@@ -1,0 +1,220 @@
+name: build sealos runtime image
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v15.*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_REPOSITORY: polardb-pg
+  DEVEL_IMAGE: polardb/polardb_pg_devel:anolis8
+
+jobs:
+  build-image:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Fetch source code
+        uses: actions/checkout@v4
+
+      - name: Compute image metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          polar_major_version="$(grep AC_INIT configure.ac | awk -F'[][]' '{print $4}')"
+          polar_minor_version="$(grep '^POLAR_MINORVERSION' configure.ac | cut -d '"' -f2)"
+          polar_version="${polar_major_version}.${polar_minor_version}"
+          polar_commit="$(git rev-parse --short=8 HEAD)"
+          image_version="${polar_version}-${polar_commit}"
+          image_name="${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_REPOSITORY}"
+
+          echo "polar_version=${polar_version}" >> "$GITHUB_OUTPUT"
+          echo "polar_commit=${polar_commit}" >> "$GITHUB_OUTPUT"
+          echo "image_version=${image_version}" >> "$GITHUB_OUTPUT"
+          echo "image_name=${image_name}" >> "$GITHUB_OUTPUT"
+          echo "image_arch_tag=${image_name}:${image_version}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build RPM package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker run --rm -t \
+            -v "$PWD":/home/postgres/PolarDB-for-PostgreSQL \
+            "${DEVEL_IMAGE}" \
+            bash -lc "cd /home/postgres/PolarDB-for-PostgreSQL && \
+                      sudo chown -R postgres:postgres . && \
+                      cd package/rpm && \
+                      if [ -f /etc/bashrc ]; then source /etc/bashrc; fi && \
+                      ./build-rpm.sh"
+
+          sudo chown -R "$(id -u):$(id -g)" "$PWD"
+
+      - name: Locate RPM package
+        id: rpm
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rpm_path="$(find package/rpm -type f -name 'PolarDB-*.rpm' | sort | head -n 1)"
+          if [ -z "${rpm_path}" ]; then
+            echo "No PolarDB RPM package found" >&2
+            exit 1
+          fi
+
+          case "${{ matrix.arch }}" in
+            amd64)
+              echo "${rpm_path}" | grep -E '\.(x86_64|amd64)\.rpm$'
+              ;;
+            arm64)
+              echo "${rpm_path}" | grep -E '\.(aarch64|arm64)\.rpm$'
+              ;;
+          esac
+
+          rpm_name="$(basename "${rpm_path}")"
+          cp "${rpm_path}" docker/sealos/
+
+          echo "rpm_path=${rpm_path}" >> "$GITHUB_OUTPUT"
+          echo "rpm_name=${rpm_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.rpm.outputs.rpm_name }}
+          path: ${{ steps.rpm.outputs.rpm_path }}
+          compression-level: 0
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Sealos runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker build \
+            --platform "${{ matrix.platform }}" \
+            -t "${{ steps.meta.outputs.image_arch_tag }}" \
+            docker/sealos
+
+      - name: Smoke test runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image="${{ steps.meta.outputs.image_arch_tag }}"
+          volume="polardb-ci-${{ matrix.arch }}-${GITHUB_RUN_ID}"
+
+          cleanup() {
+            docker rm -f polardb-test polardb-test-restart >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          wait_ready() {
+            local container="$1"
+            for i in $(seq 1 90); do
+              if docker exec "$container" pg_isready -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; then
+                return 0
+              fi
+              if ! docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null | grep -q true; then
+                docker logs "$container" || true
+                return 1
+              fi
+              sleep 2
+            done
+            docker logs "$container" || true
+            return 1
+          }
+
+          docker volume create "$volume"
+          docker run -d --name polardb-test \
+            -e POSTGRES_PASSWORD=test \
+            -v "$volume":/var/lib/polardb \
+            "$image"
+
+          wait_ready polardb-test
+          docker exec polardb-test psql -h 127.0.0.1 -p 5432 -U postgres postgres -c "SELECT version();"
+          docker logs polardb-test | grep "PolarDB initialization completed"
+          docker rm -f polardb-test
+
+          docker run -d --name polardb-test-restart \
+            -e POSTGRES_PASSWORD=test \
+            -v "$volume":/var/lib/polardb \
+            "$image"
+
+          wait_ready polardb-test-restart
+          docker logs polardb-test-restart | grep "PolarDB data directory already initialized, skipping init"
+
+      - name: Push architecture image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${{ steps.meta.outputs.image_arch_tag }}"
+
+  publish-manifest:
+    needs: build-image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch source code
+        uses: actions/checkout@v4
+
+      - name: Compute manifest metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          polar_major_version="$(grep AC_INIT configure.ac | awk -F'[][]' '{print $4}')"
+          polar_minor_version="$(grep '^POLAR_MINORVERSION' configure.ac | cut -d '"' -f2)"
+          polar_version="${polar_major_version}.${polar_minor_version}"
+          polar_commit="$(git rev-parse --short=8 HEAD)"
+          image_version="${polar_version}-${polar_commit}"
+          image_name="${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_REPOSITORY}"
+
+          echo "image_name=${image_name}" >> "$GITHUB_OUTPUT"
+          echo "image_version=${image_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image="${{ steps.meta.outputs.image_name }}"
+          version="${{ steps.meta.outputs.image_version }}"
+
+          docker buildx imagetools create \
+            -t "${image}:${version}" \
+            -t "${image}:15" \
+            "${image}:${version}-amd64" \
+            "${image}:${version}-arm64"
+
+          docker buildx imagetools inspect "${image}:${version}"
