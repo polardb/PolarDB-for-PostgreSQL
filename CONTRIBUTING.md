@@ -10,8 +10,8 @@ PolarDB for PostgreSQL is an open source project based on PostgreSQL and other o
 
 Here is a checklist to prepare and submit your PR (pull request):
 
-- Create your own Github repository copy by forking `ApsaraDB/PolarDB-for-PostgreSQL`.
-- Checkout documentations [Advanced Deployment](https://apsaradb.github.io/PolarDB-for-PostgreSQL/deploying/deploy.html) for how to hack PolarDB-PG.
+- Create your own Github repository copy by forking `polardb/PolarDB-for-PostgreSQL`.
+- Checkout documentations [Advanced Deployment](https://polardb.github.io/polardb-pg-docs/deploying/deploy.html) for how to hack PolarDB-PG.
 - Run `make stylecheck` to format your code, and push changes to your personal fork.
 - Edit detailed commit message, and create a PR to upstream.
 - Wait for all CI checks to pass.

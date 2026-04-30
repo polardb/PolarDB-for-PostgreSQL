@@ -1,6 +1,6 @@
 <div align="center">
 
-[![logo](https://raw.githubusercontent.com/polardb/polardb-pg-docs/main/docs/.vuepress/public/images/polardb.png)](https://apsaradb.github.io/PolarDB-for-PostgreSQL/)
+[![logo](https://raw.githubusercontent.com/polardb/polardb-pg-docs/main/docs/.vuepress/public/images/polardb.png)](https://polardb.github.io/polardb-pg-docs/)
 
 # PolarDB for PostgreSQL
 
@@ -8,17 +8,17 @@
 
 #### English | [简体中文](./README_zh.md)
 
-[![official](https://img.shields.io/badge/official%20site-blueviolet?style=flat&logo=alibabacloud)](https://apsaradb.github.io/PolarDB-for-PostgreSQL/)
+[![official](https://img.shields.io/badge/official%20site-blueviolet?style=flat&logo=alibabacloud)](https://polardb.github.io/polardb-pg-docs/)
 
-[![GitHub License](https://img.shields.io/github/license/ApsaraDB/PolarDB-for-PostgreSQL?style=flat&logo=apache)](./LICENSE)
-[![github-issues](https://img.shields.io/github/issues/ApsaraDB/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/ApsaraDB/PolarDB-for-PostgreSQL/issues)
-[![github-pullrequest](https://img.shields.io/github/issues-pr/ApsaraDB/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/ApsaraDB/PolarDB-for-PostgreSQL/pulls)
-[![GitHub Discussions](https://img.shields.io/github/discussions/ApsaraDB/PolarDB-for-PostgreSQL?logo=github)](https://github.com/ApsaraDB/PolarDB-for-PostgreSQL/discussions)
-[![github-forks](https://img.shields.io/github/forks/ApsaraDB/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/ApsaraDB/PolarDB-for-PostgreSQL/network/members)
-[![github-stars](https://img.shields.io/github/stars/ApsaraDB/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/ApsaraDB/PolarDB-for-PostgreSQL/stargazers)
-[![github-contributors](https://img.shields.io/github/contributors/ApsaraDB/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/ApsaraDB/PolarDB-for-PostgreSQL/graphs/contributors)
-[![GitHub deployments](<https://img.shields.io/github/deployments/ApsaraDB/PolarDB-for-PostgreSQL/github-pages?logo=github&label=github-pages%20(docs)>)](https://apsaradb.github.io/PolarDB-for-PostgreSQL/zh/)
-[![GitHub branch check runs](<https://img.shields.io/github/check-runs/ApsaraDB/PolarDB-for-PostgreSQL/POLARDB_15_STABLE?logo=github&label=checks%20(v15)>)](https://github.com/ApsaraDB/PolarDB-for-PostgreSQL/tree/POLARDB_15_STABLE)
+[![GitHub License](https://img.shields.io/github/license/polardb/PolarDB-for-PostgreSQL?style=flat&logo=apache)](./LICENSE)
+[![github-issues](https://img.shields.io/github/issues/polardb/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/polardb/PolarDB-for-PostgreSQL/issues)
+[![github-pullrequest](https://img.shields.io/github/issues-pr/polardb/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/polardb/PolarDB-for-PostgreSQL/pulls)
+[![GitHub Discussions](https://img.shields.io/github/discussions/polardb/PolarDB-for-PostgreSQL?logo=github)](https://github.com/polardb/PolarDB-for-PostgreSQL/discussions)
+[![github-forks](https://img.shields.io/github/forks/polardb/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/polardb/PolarDB-for-PostgreSQL/network/members)
+[![github-stars](https://img.shields.io/github/stars/polardb/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/polardb/PolarDB-for-PostgreSQL/stargazers)
+[![github-contributors](https://img.shields.io/github/contributors/polardb/PolarDB-for-PostgreSQL?style=flat&logo=github)](https://github.com/polardb/PolarDB-for-PostgreSQL/graphs/contributors)
+[![GitHub deployments](<https://img.shields.io/github/deployments/polardb/polardb-pg-docs/github-pages?logo=github&label=github-pages%20(docs)>)](https://polardb.github.io/polardb-pg-docs/zh/)
+[![GitHub branch check runs](<https://img.shields.io/github/check-runs/polardb/PolarDB-for-PostgreSQL/POLARDB_15_STABLE?logo=github&label=checks%20(v15)>)](https://github.com/polardb/PolarDB-for-PostgreSQL/tree/POLARDB_15_STABLE)
 [![Leaderboard](https://img.shields.io/badge/PolarDB--for--PostgreSQL-Check%20Your%20Contribution-orange?style=flat&logo=alibabacloud)](https://opensource.alibaba.com/contribution_leaderboard/details?projectValue=polardb-pg)
 
 </div>
@@ -51,7 +51,7 @@ PolarDB for PostgreSQL uses a shared-storage-based architecture in which computi
 
 After computing is decoupled from storage, the I/O latency and throughput increase. When a single read-only node is used to process analytical queries, the CPUs, memory, and I/O of other read-only nodes and the large storage I/O bandwidth cannot be fully utilized. To resolve this issue, PolarDB provides the shared-storage-based MPP engine. The engine can use CPUs to accelerate analytical queries at SQL level and support a mix of OLAP workloads and OLTP workloads for HTAP.
 
-For more information, see [Architecture](https://apsaradb.github.io/PolarDB-for-PostgreSQL/theory/arch-overview.html).
+For more information, see [Architecture](https://polardb.github.io/polardb-pg-docs/theory/arch-overview.html).
 
 ## Quick Start with PolarDB
 
@@ -69,31 +69,31 @@ postgres=# SELECT version();
 (1 row)
 ```
 
-For more advanced deployment way, please refer to [Advanced Deployment](https://apsaradb.github.io/PolarDB-for-PostgreSQL/deploying/deploy.html). Before your deployment, we recommand to figure out the [Architecture](https://apsaradb.github.io/PolarDB-for-PostgreSQL/deploying/introduction.html) of PolarDB for PostgreSQL.
+For more advanced deployment way, please refer to [Advanced Deployment](https://polardb.github.io/polardb-pg-docs/deploying/deploy.html). Before your deployment, we recommand to figure out the [Architecture](https://polardb.github.io/polardb-pg-docs/deploying/introduction.html) of PolarDB for PostgreSQL.
 
 ## Development
 
-Please refer to [Development Guide](https://apsaradb.github.io/PolarDB-for-PostgreSQL/development/dev-on-docker.html) to compile and development PolarDB for PostgreSQL.
+Please refer to [Development Guide](https://polardb.github.io/polardb-pg-docs/development/dev-on-docker.html) to compile and development PolarDB for PostgreSQL.
 
 ## Documentation
 
-Please refer to [Online Documentation Website](https://apsaradb.github.io/PolarDB-for-PostgreSQL/) to see the whole documentations.
+Please refer to [Online Documentation Website](https://polardb.github.io/polardb-pg-docs/) to see the whole documentations.
 
-If you want to explore or develop documentation locally, see [Document Contribution](https://apsaradb.github.io/PolarDB-for-PostgreSQL/contributing/contributing-polardb-docs.html).
+If you want to explore or develop documentation locally, see [Document Contribution](https://polardb.github.io/polardb-pg-docs/contributing/contributing-polardb-docs.html).
 
 ## Contributing
 
 You are welcome to make contributions to PolarDB for PostgreSQL. Here are the contributors:
 
-<a href="https://github.com/ApsaraDB/PolarDB-for-PostgreSQL/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ApsaraDB/PolarDB-for-PostgreSQL" />
+<a href="https://github.com/polardb/PolarDB-for-PostgreSQL/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=polardb/PolarDB-for-PostgreSQL" />
 </a>
 
 Made with [contrib.rocks](https://contrib.rocks).
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=ApsaraDB/PolarDB-for-PostgreSQL&type=Date)](https://star-history.com/#ApsaraDB/PolarDB-for-PostgreSQL&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=polardb/PolarDB-for-PostgreSQL&type=Date)](https://star-history.com/#polardb/PolarDB-for-PostgreSQL&Date)
 
 ## Software License
 
