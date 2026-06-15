@@ -203,11 +203,13 @@ prefix_range *make_prefix_range(char *str, char first, char last) {
 
   else
     pr = build_pr("", first, last);
-
+  if( str != NULL ){
   len = strlen(pr->prefix);
   memcpy(pr->prefix, str, len);
   pr->prefix[len] = 0;
-
+  } else{
+  pr->prefix[0] = 0;
+  }
   return pr_normalize(pr);
 }
 
