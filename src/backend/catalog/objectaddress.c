@@ -4948,7 +4948,7 @@ getObjectIdentityParts(const ObjectAddress *object,
 									 getObjectIdentityParts(&domain, objname,
 															objargs, false));
 
-					if (objname)
+					if (objargs)
 						*objargs = lappend(*objargs, pstrdup(NameStr(con->conname)));
 				}
 
