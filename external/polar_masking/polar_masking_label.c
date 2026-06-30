@@ -1219,3 +1219,124 @@ polar_masking_alter_label_maskingop_set_regexpmasking(PG_FUNCTION_ARGS)
 	table_close(policy_rel, ExclusiveLock);
 	PG_RETURN_NULL();
 }
+
+/*
+ * check the masking operator for column
+ */
+bool
+check_masking_for_column(MaskingInfo * maskinfo)
+{
+	HeapTuple	tuple;
+	bool		IsNull;
+	int			labelid;
+	Relation	label_tab_rel;
+	Relation	label_col_rel;
+	Relation	policy_rel;
+	SysScanDesc scandesc;
+	ScanKeyData scankey;
+	Oid			policy_rel_oid;
+	Oid			label_col_rel_oid;
+	Oid			label_tab_rel_oid;
+	Oid			regex_rel_oid;
+	Oid			policy_labelid_idxid;
+
+	if (maskinfo->relid == InvalidOid)
+	{
+		return false;
+	}
+
+	policy_rel_oid = GetPolarMaskingPolicyRelid();
+	label_col_rel_oid = GetPolarMaskingLabelColRelid();
+	label_tab_rel_oid = GetPolarMaskingLabelTabRelid();
+	regex_rel_oid = GetPolarMaskingPolicyRegexRelid();
+
+	if (!OidIsValid(policy_rel_oid) || !OidIsValid(label_col_rel_oid) ||
+		!OidIsValid(label_tab_rel_oid) || !OidIsValid(regex_rel_oid))
+	{
+		elog(ERROR, "cannot find masking relations");
+	}
+
+	label_tab_rel = table_open(label_tab_rel_oid, RowExclusiveLock);
+	label_col_rel = table_open(label_col_rel_oid, RowExclusiveLock);
+	policy_rel = table_open(policy_rel_oid, RowExclusiveLock);
+
+	labelid = get_labelid_applied_on_table_or_column(label_tab_rel, label_col_rel, maskinfo->relid, maskinfo->attnum);
+
+	if (labelid == InvalidMaskingLabelId)
+	{
+		table_close(policy_rel, RowExclusiveLock);
+		table_close(label_col_rel, RowExclusiveLock);
+		table_close(label_tab_rel, RowExclusiveLock);
+		return false;
+	}
+
+	ScanKeyInit(&scankey,
+				Anum_polar_masking_policy_labelid,
+				BTEqualStrategyNumber, F_INT4EQ,
+				Int32GetDatum(labelid));
+
+	if (OidIsValid(policy_labelid_idxid = GetPolarMaskingPolicyLabelidIdxid()))
+	{
+		scandesc = systable_beginscan(policy_rel, policy_labelid_idxid, true,
+									  NULL, 1, &scankey);
+	}
+	else
+	{
+		scandesc = systable_beginscan(policy_rel, InvalidOid, false,
+									  NULL, 1, &scankey);
+	}
+
+	tuple = systable_getnext(scandesc);
+
+	Assert(HeapTupleIsValid(tuple));
+
+	maskinfo->masking_op = DatumGetInt16(heap_getattr(tuple, Anum_polar_masking_policy_operator, RelationGetDescr(policy_rel), &IsNull));
+
+	if (maskinfo->masking_op == MASKING_UNKNOWN)
+	{
+		systable_endscan(scandesc);
+		table_close(policy_rel, RowExclusiveLock);
+		table_close(label_col_rel, RowExclusiveLock);
+		table_close(label_tab_rel, RowExclusiveLock);
+		return false;
+	}
+
+	systable_endscan(scandesc);
+
+	if (maskinfo->masking_op == MASKING_REGEXP)
+	{
+		Relation	regex_rel = table_open(regex_rel_oid, RowExclusiveLock);
+		Oid			regex_idxid;
+
+		ScanKeyInit(&scankey,
+					Anum_polar_masking_policy_regex_labelid,
+					BTEqualStrategyNumber, F_INT4EQ,
+					Int32GetDatum(labelid));
+
+		if (OidIsValid(regex_idxid = GetPolarMaskingPolicyRegexLabelidIdxid()))
+		{
+			scandesc = systable_beginscan(regex_rel, regex_idxid, true,
+										  NULL, 1, &scankey);
+		}
+		else
+		{
+			scandesc = systable_beginscan(regex_rel, InvalidOid, false,
+										  NULL, 1, &scankey);
+		}
+
+		tuple = systable_getnext(scandesc);
+		Assert(HeapTupleIsValid(tuple));
+
+		maskinfo->regex = heap_getattr(tuple, Anum_polar_masking_policy_regex_regex, RelationGetDescr(regex_rel), &IsNull);
+		maskinfo->start = DatumGetInt32(heap_getattr(tuple, Anum_polar_masking_policy_regex_start_pos, RelationGetDescr(regex_rel), &IsNull));
+		maskinfo->end = DatumGetInt32(heap_getattr(tuple, Anum_polar_masking_policy_regex_end_pos, RelationGetDescr(regex_rel), &IsNull));
+		maskinfo->replace_text = heap_getattr(tuple, Anum_polar_masking_policy_regex_replace_text, RelationGetDescr(regex_rel), &IsNull);
+		systable_endscan(scandesc);
+		table_close(regex_rel, RowExclusiveLock);
+	}
+
+	table_close(policy_rel, RowExclusiveLock);
+	table_close(label_col_rel, RowExclusiveLock);
+	table_close(label_tab_rel, RowExclusiveLock);
+	return true;
+}

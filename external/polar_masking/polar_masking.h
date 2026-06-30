@@ -99,4 +99,23 @@ enum
 	MASKING_ALL // maskall
 };
 
+typedef struct MaskingInfo
+{
+	Oid			relid;
+	AttrNumber	attnum;
+	/* InvalidAttrNumber is used for relation policy */
+	int16		masking_op;
+	/* masking opeartor */
+
+	/*
+	 * following are attributes for regexpmasking
+	 */
+	int			start;
+	int			end;
+	Datum		regex;
+	Datum		replace_text;
+}			MaskingInfo;
+
+extern bool check_masking_for_column(MaskingInfo * maskinfo);
+
 #endif
