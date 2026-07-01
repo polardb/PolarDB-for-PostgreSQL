@@ -1,0 +1,68 @@
+create extension polar_masking;
+show polar_masking.polar_masking_enabled;
+ polar_masking.polar_masking_enabled 
+-------------------------------------
+ on
+(1 row)
+
+create table test1(a int, b text, c varchar, d name);
+create schema test_masking;
+create table test_masking.test2(a int, b text, c varchar, d name);
+create table test_masking.test3(a int, b text);
+create table test_masking.test4(a int, b text);
+-- label create/drop
+select polar_masking.polar_masking_create_label(NULL);
+ERROR:  the label name can not be null
+select polar_masking.polar_masking_create_label('label1');
+ polar_masking_create_label 
+----------------------------
+ 
+(1 row)
+
+select polar_masking.polar_masking_create_label('label1');
+ERROR:  masking label name: "label1" already exists
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       1 | label1 |        0
+(1 row)
+
+select polar_masking.polar_masking_create_label('Label2');
+ polar_masking_create_label 
+----------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       1 | label1 |        0
+       2 | Label2 |        0
+(2 rows)
+
+select polar_masking.polar_masking_drop_label(NULL);
+ERROR:  the label name can not be null
+select polar_masking.polar_masking_drop_label('Label_2');
+ERROR:  masking label name: "Label_2" does not exist
+select polar_masking.polar_masking_drop_label('Label2');
+ polar_masking_drop_label 
+--------------------------
+ 
+(1 row)
+
+select polar_masking.polar_masking_drop_label('Label2');
+ERROR:  masking label name: "Label2" does not exist
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       1 | label1 |        0
+(1 row)
+
+-- clear
+drop table test1;
+drop schema test_masking cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table test_masking.test2
+drop cascades to table test_masking.test3
+drop cascades to table test_masking.test4
+drop extension polar_masking;
