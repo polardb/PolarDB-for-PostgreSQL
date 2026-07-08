@@ -117,5 +117,6 @@ typedef struct MaskingInfo
 }			MaskingInfo;
 
 extern bool check_masking_for_column(MaskingInfo * maskinfo);
+extern Oid	get_masking_funcid(int masking_op);
 
 #endif

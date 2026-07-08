@@ -15,9 +15,12 @@
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_proc.h"
 #include "utils/builtins.h"
+#include "utils/catcache.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
+#include "utils/syscache.h"
 
 PG_FUNCTION_INFO_V1(polar_masking_create_label);
 PG_FUNCTION_INFO_V1(polar_masking_drop_label);
@@ -34,6 +37,10 @@ static int	get_masking_labelid_ifexist(Relation policy_rel, char *labelname);
 static int16 get_masking_operator_value_by_name(char *masking_op);
 static void remove_regexpmasking_parameters(int labelid);
 static void set_regexpmasking_parameters(int labelid, int startpos, int endpos, char *regex, char *replacetext);
+
+static const Oid masking_func_arg1_array[] = {TEXTOID};
+static const Oid masking_func_arg2_array[] = {TEXTOID, BPCHAROID};
+static const Oid masking_regex_func_arg_array[] = {TEXTOID, TEXTOID, TEXTOID, INT4OID, INT4OID};
 
 /*
  * get the labelid if table or the column of table is set a masking label
@@ -1339,4 +1346,100 @@ check_masking_for_column(MaskingInfo * maskinfo)
 	table_close(label_col_rel, RowExclusiveLock);
 	table_close(label_tab_rel, RowExclusiveLock);
 	return true;
+}
+
+/*
+ * get masking function Oid by function name and args
+ */
+static Oid
+get_function_id(int arglen, const Oid argarr[], const char *funcname)
+{
+	CatCList   *catlist = NULL;
+	Oid			funcid = InvalidOid;
+
+	catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+
+	if (catlist != NULL)
+	{
+		for (int i = 0; i < catlist->n_members; ++i)
+		{
+			HeapTuple	proctup = &catlist->members[i]->tuple;
+			Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
+			bool		samearg = true;;
+			if (procform)
+			{
+				/*
+				 * check function namespace
+				 */
+				if (procform->pronamespace != POLAR_MASKING_NAMESPACE)
+					continue;
+
+				/*
+				 * check function arg length and type
+				 */
+				if (arglen != procform->pronargs)
+					continue;
+
+				for (int i = 0; i < arglen; i++)
+				{
+					if (argarr[i] != procform->proargtypes.values[i])
+					{
+						samearg = false;
+						break;
+					}
+				}
+				if (samearg)
+				{
+					funcid = procform->oid;
+					break;
+				}
+			}
+		}
+	}
+
+	ReleaseSysCacheList(catlist);
+	return funcid;
+}
+
+/*
+ * get the masking function Oid by masking operator
+ */
+Oid
+get_masking_funcid(int masking_op)
+{
+	Oid			funcid = InvalidOid;
+
+	Assert(masking_op != MASKING_UNKNOWN);
+
+	switch (masking_op)
+	{
+		case MASKING_CREDITCARD:
+			funcid = get_function_id(2, masking_func_arg2_array, "creditcardmasking");
+			break;
+		case MASKING_BASICEMAIL:
+			funcid = get_function_id(2, masking_func_arg2_array, "basicemailmasking");
+			break;
+		case MASKING_FULLEMAIL:
+			funcid = get_function_id(2, masking_func_arg2_array, "fullemailmasking");
+			break;
+		case MASKING_ALLDIGITS:
+			funcid = get_function_id(2, masking_func_arg2_array, "alldigitsmasking");
+			break;
+		case MASKING_SHUFFLE:
+			funcid = get_function_id(1, masking_func_arg1_array, "shufflemasking");
+			break;
+		case MASKING_RANDOM:
+			funcid = get_function_id(1, masking_func_arg1_array, "randommasking");
+			break;
+		case MASKING_REGEXP:
+			funcid = get_function_id(5, masking_regex_func_arg_array, "regexpmasking");
+			break;
+		case MASKING_ALL:
+			funcid = get_function_id(2, masking_func_arg2_array, "maskall");
+			break;
+		default:
+			elog(ERROR, "unknown masking operator: %d", masking_op);
+			break;
+	}
+	return funcid;
 }
