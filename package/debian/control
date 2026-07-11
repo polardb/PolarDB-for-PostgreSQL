@@ -1,6 +1,6 @@
 Package: polardb-for-postgresql
 Maintainer: mrdrivingduck <mrdrivingduck@gmail.com>
-Depends: libicu66 | libicu67 | libicu70 | libicu72 | libicu74 | libicu76, libkrb5-3, libldap-2.4-2 | libldap-2.5-0 | libldap2
+Depends: libicu66 | libicu67 | libicu70 | libicu72 | libicu74 | libicu76 | libicu78, libkrb5-3, libldap-2.4-2 | libldap-2.5-0 | libldap2
 Section: database
 Priority: optional
 Homepage: https://github.com/ApsaraDB/PolarDB-for-PostgreSQL
