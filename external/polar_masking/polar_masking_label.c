@@ -817,7 +817,7 @@ polar_masking_apply_label_to_column(PG_FUNCTION_ARGS)
 		table_close(policy_rel, ExclusiveLock);
 		ereport(ERROR,
 				(errcode(ERRCODE_DUPLICATE_OBJECT),
-				 errmsg("masking label already be applied on the table or columns, cannot applicy the label now"),
+				 errmsg("masking label already be applied on the table or the column, cannot apply the label now"),
 				 errhint("you have to remove the label applied on the table or table's column firstly")));
 	}
 
