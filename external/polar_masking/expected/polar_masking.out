@@ -247,6 +247,321 @@ select polar_masking.polar_masking_drop_label('label1');
  
 (1 row)
 
+-- masking operators test
+drop table test1;
+create table test1(a int, b text, c varchar, d name, e bpchar, f char);
+insert into test1 values (1,'1000-1111-1111-0011', 'abc-1111-1111-0011', 'abc-1111-1111-@1aa', 'abbcc-xx-addd-@aa.a','a');
+insert into test1 values (2,'1111111@aaaa.com', 'aaaabbbb@aaaa.com', 'ccccccaabbbb@a123a.com', 'd@a123.com','b');
+insert into test1 values (3,'1111111@aaaa.com', '1abc-1111-1d11-0d011', '111111111', 'abcdefg','4');
+insert into test1 values (4,'1111111@aaaa.com', '1abc-1111-1d11-0d011', '123456789', 'abcdefg123','c');
+insert into test1 values (5,'1111111@aaaa.com', '1abc-1111-1d11-0d011', '123456789', 'abcdefg123','c');
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 1000-1111-1111-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a
+ 2 | 1111111@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@a123a.com | d@a123.com          | b
+ 3 | 1111111@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4
+ 4 | 1111111@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg123          | c
+ 5 | 1111111@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg123          | c
+(5 rows)
+
+select polar_masking.polar_masking_create_label('label1');
+ polar_masking_create_label 
+----------------------------
+ 
+(1 row)
+
+select polar_masking.polar_masking_apply_label_to_table('label1', 'public','test1');
+ polar_masking_apply_label_to_table 
+------------------------------------
+ 
+(1 row)
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'creditcardmasking');
+ polar_masking_alter_label_maskingop 
+-------------------------------------
+ 
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | xxxx-xxxx-xxxx-0011 | abc-xxxx-xxxx-0011   | abc-xxxx-xxxx-@1aa     | abbcc-xx-addd-@aa.a | a
+ 2 | xxxxxxx@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@axxxa.com | d@axxx.com          | b
+ 3 | xxxxxxx@aaaa.com    | xabc-xxxx-xdxx-xd011 | xxxxx1111              | abcdefg             | 4
+ 4 | xxxxxxx@aaaa.com    | xabc-xxxx-xdxx-xd011 | xxxxx6789              | abcdefg123          | c
+ 5 | xxxxxxx@aaaa.com    | xabc-xxxx-xdxx-xd011 | xxxxx6789              | abcdefg123          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'basicemailmasking');
+ polar_masking_alter_label_maskingop 
+-------------------------------------
+ 
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 1000-1111-1111-0011 | abc-1111-1111-0011   | xxxxxxxxxxxxxx@1aa     | xxxxxxxxxxxxxx@aa.a | a
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@a123a.com | x@a123.com          | b
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg123          | c
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg123          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'fullemailmasking');
+ polar_masking_alter_label_maskingop 
+-------------------------------------
+ 
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 1000-1111-1111-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | xxxxxxxxxxxxxx@xx.a | a
+ 2 | xxxxxxx@xxxx.com    | xxxxxxxx@xxxx.com    | xxxxxxxxxxxx@xxxxx.com | x@xxxx.com          | b
+ 3 | xxxxxxx@xxxx.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4
+ 4 | xxxxxxx@xxxx.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg123          | c
+ 5 | xxxxxxx@xxxx.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg123          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'alldigitsmasking');
+ polar_masking_alter_label_maskingop 
+-------------------------------------
+ 
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 0000-0000-0000-0000 | abc-0000-0000-0000   | abc-0000-0000-@0aa     | abbcc-xx-addd-@aa.a | a
+ 2 | 0000000@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@a000a.com | d@a000.com          | b
+ 3 | 0000000@aaaa.com    | 0abc-0000-0d00-0d000 | 000000000              | abcdefg             | 0
+ 4 | 0000000@aaaa.com    | 0abc-0000-0d00-0d000 | 000000000              | abcdefg000          | c
+ 5 | 0000000@aaaa.com    | 0abc-0000-0d00-0d000 | 000000000              | abcdefg000          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'shufflemasking');
+ polar_masking_alter_label_maskingop 
+-------------------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       3 | label2 |        0
+       4 | label1 |        5
+(2 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'randommasking');
+ polar_masking_alter_label_maskingop 
+-------------------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       3 | label2 |        0
+       4 | label1 |        6
+(2 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'maskall');
+ polar_masking_alter_label_maskingop 
+-------------------------------------
+ 
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | xxxxxxxxxxxxxxxxxxx | xxxxxxxxxxxxxxxxxx   | xxxxxxxxxxxxxxxxxx     | xxxxxxxxxxxxxxxxxxx | x
+ 2 | xxxxxxxxxxxxxxxx    | xxxxxxxxxxxxxxxxx    | xxxxxxxxxxxxxxxxxxxxxx | xxxxxxxxxx          | x
+ 3 | xxxxxxxxxxxxxxxx    | xxxxxxxxxxxxxxxxxxxx | xxxxxxxxx              | xxxxxxx             | x
+ 4 | xxxxxxxxxxxxxxxx    | xxxxxxxxxxxxxxxxxxxx | xxxxxxxxx              | xxxxxxxxxx          | x
+ 5 | xxxxxxxxxxxxxxxx    | xxxxxxxxxxxxxxxxxxxx | xxxxxxxxx              | xxxxxxxxxx          | x
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 5, 8, '[\d+]', 'z');
+ polar_masking_alter_label_maskingop_set_regexpmasking 
+-------------------------------------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       3 | label2 |        0
+       4 | label1 |        7
+(2 rows)
+
+select * from polar_masking.polar_masking_policy_regex;
+ labelid | start_pos | end_pos | regex | replace_text 
+---------+-----------+---------+-------+--------------
+       4 |         5 |       8 | [\d+] | z
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 1000-zzz1-1111-0011 | abc-zzzz-1111-0011   | abc-zzzz-1111-@1aa     | abbcc-xx-addd-@aa.a | a
+ 2 | 1111zzz@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@a123a.com | d@a1zz.com          | b
+ 3 | 1111zzz@aaaa.com    | 1abc-zzz1-1d11-0d011 | 1111zzzz1              | abcdefg             | 4
+ 4 | 1111zzz@aaaa.com    | 1abc-zzz1-1d11-0d011 | 1234zzzz9              | abcdefgz23          | c
+ 5 | 1111zzz@aaaa.com    | 1abc-zzz1-1d11-0d011 | 1234zzzz9              | abcdefgz23          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 2, 12, '[\d+]', 'z');
+ polar_masking_alter_label_maskingop_set_regexpmasking 
+-------------------------------------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       3 | label2 |        0
+       4 | label1 |        7
+(2 rows)
+
+select * from polar_masking.polar_masking_policy_regex;
+ labelid | start_pos | end_pos | regex | replace_text 
+---------+-----------+---------+-------+--------------
+       4 |         2 |      12 | [\d+] | z
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 1zzz-zzzz-zz11-0011 | abc-zzzz-zzz1-0011   | abc-zzzz-zzz1-@1aa     | abbcc-xx-addd-@aa.a | a
+ 2 | 1zzzzzz@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@a123a.com | d@azzz.com          | b
+ 3 | 1zzzzzz@aaaa.com    | 1abc-zzzz-zd11-0d011 | 1zzzzzzzz              | abcdefg             | 4
+ 4 | 1zzzzzz@aaaa.com    | 1abc-zzzz-zd11-0d011 | 1zzzzzzzz              | abcdefgzzz          | c
+ 5 | 1zzzzzz@aaaa.com    | 1abc-zzzz-zd11-0d011 | 1zzzzzzzz              | abcdefgzzz          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'creditcardmasking');
+ polar_masking_alter_label_maskingop 
+-------------------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       3 | label2 |        0
+       4 | label1 |        1
+(2 rows)
+
+select * from polar_masking.polar_masking_policy_regex;
+ labelid | start_pos | end_pos | regex | replace_text 
+---------+-----------+---------+-------+--------------
+(0 rows)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | xxxx-xxxx-xxxx-0011 | abc-xxxx-xxxx-0011   | abc-xxxx-xxxx-@1aa     | abbcc-xx-addd-@aa.a | a
+ 2 | xxxxxxx@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@axxxa.com | d@axxx.com          | b
+ 3 | xxxxxxx@aaaa.com    | xabc-xxxx-xdxx-xd011 | xxxxx1111              | abcdefg             | 4
+ 4 | xxxxxxx@aaaa.com    | xabc-xxxx-xdxx-xd011 | xxxxx6789              | abcdefg123          | c
+ 5 | xxxxxxx@aaaa.com    | xabc-xxxx-xdxx-xd011 | xxxxx6789              | abcdefg123          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', -1, 12, '[\d+]', 'z');
+ERROR:  the start or end position should >= 0
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 1, -12, '[\d+]', 'z');
+ERROR:  the start or end position should >= 0
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 8, 4, '[\d+]', 'z');
+ERROR:  the start position should not greater than end position(8 > 4) in regexpmasking
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 0, 0, '[\d+]', 'z');
+ polar_masking_alter_label_maskingop_set_regexpmasking 
+-------------------------------------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       3 | label2 |        0
+       4 | label1 |        7
+(2 rows)
+
+select * from polar_masking.polar_masking_policy_regex;
+ labelid | start_pos | end_pos | regex | replace_text 
+---------+-----------+---------+-------+--------------
+       4 |         0 |       0 | [\d+] | z
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | zzzz-zzzz-zzzz-zzzz | abc-zzzz-zzzz-zzzz   | abc-zzzz-zzzz-@zaa     | abbcc-xx-addd-@aa.a | a
+ 2 | zzzzzzz@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@azzza.com | d@azzz.com          | b
+ 3 | zzzzzzz@aaaa.com    | zabc-zzzz-zdzz-zdzzz | zzzzzzzzz              | abcdefg             | z
+ 4 | zzzzzzz@aaaa.com    | zabc-zzzz-zdzz-zdzzz | zzzzzzzzz              | abcdefgzzz          | c
+ 5 | zzzzzzz@aaaa.com    | zabc-zzzz-zdzz-zdzzz | zzzzzzzzz              | abcdefgzzz          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 0, 3, '[\d+]', 'z');
+ polar_masking_alter_label_maskingop_set_regexpmasking 
+-------------------------------------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       3 | label2 |        0
+       4 | label1 |        7
+(2 rows)
+
+select * from polar_masking.polar_masking_policy_regex;
+ labelid | start_pos | end_pos | regex | replace_text 
+---------+-----------+---------+-------+--------------
+       4 |         0 |       3 | [\d+] | z
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | zzz0-1111-1111-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a
+ 2 | zzz1111@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@a123a.com | d@a123.com          | b
+ 3 | zzz1111@aaaa.com    | zabc-1111-1d11-0d011 | zzz111111              | abcdefg             | z
+ 4 | zzz1111@aaaa.com    | zabc-1111-1d11-0d011 | zzz456789              | abcdefg123          | c
+ 5 | zzz1111@aaaa.com    | zabc-1111-1d11-0d011 | zzz456789              | abcdefg123          | c
+(5 rows)
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 10, 0, '[\d+]', 'z');
+ polar_masking_alter_label_maskingop_set_regexpmasking 
+-------------------------------------------------------
+ 
+(1 row)
+
+select * from polar_masking.polar_masking_policy;
+ labelid |  name  | operator 
+---------+--------+----------
+       3 | label2 |        0
+       4 | label1 |        7
+(2 rows)
+
+select * from polar_masking.polar_masking_policy_regex;
+ labelid | start_pos | end_pos | regex | replace_text 
+---------+-----------+---------+-------+--------------
+       4 |        10 |       0 | [\d+] | z
+(1 row)
+
+select * from test1;
+ a |          b          |          c           |           d            |          e          | f 
+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 1000-1111-zzzz-zzzz | abc-1111-zzzz-zzzz   | abc-1111-zzzz-@zaa     | abbcc-xx-addd-@aa.a | a
+ 2 | 1111111@aaaa.com    | aaaabbbb@aaaa.com    | ccccccaabbbb@azzza.com | d@a123.com          | b
+ 3 | 1111111@aaaa.com    | 1abc-1111-zdzz-zdzzz | 111111111              | abcdefg             | 4
+ 4 | 1111111@aaaa.com    | 1abc-1111-zdzz-zdzzz | 123456789              | abcdefg12z          | c
+ 5 | 1111111@aaaa.com    | 1abc-1111-zdzz-zdzzz | 123456789              | abcdefg12z          | c
+(5 rows)
+
 -- clear
 drop table test1;
 drop schema test_masking cascade;

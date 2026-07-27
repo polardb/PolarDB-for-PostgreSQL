@@ -76,6 +76,68 @@ select * from polar_masking.polar_masking_label_tab;
 
 select polar_masking.polar_masking_drop_label('label1');
 
+-- masking operators test
+drop table test1;
+create table test1(a int, b text, c varchar, d name, e bpchar, f char);
+
+insert into test1 values (1,'1000-1111-1111-0011', 'abc-1111-1111-0011', 'abc-1111-1111-@1aa', 'abbcc-xx-addd-@aa.a','a');
+insert into test1 values (2,'1111111@aaaa.com', 'aaaabbbb@aaaa.com', 'ccccccaabbbb@a123a.com', 'd@a123.com','b');
+insert into test1 values (3,'1111111@aaaa.com', '1abc-1111-1d11-0d011', '111111111', 'abcdefg','4');
+insert into test1 values (4,'1111111@aaaa.com', '1abc-1111-1d11-0d011', '123456789', 'abcdefg123','c');
+insert into test1 values (5,'1111111@aaaa.com', '1abc-1111-1d11-0d011', '123456789', 'abcdefg123','c');
+
+select * from test1;
+
+select polar_masking.polar_masking_create_label('label1');
+select polar_masking.polar_masking_apply_label_to_table('label1', 'public','test1');
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'creditcardmasking');
+select * from test1;
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'basicemailmasking');
+select * from test1;
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'fullemailmasking');
+select * from test1;
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'alldigitsmasking');
+select * from test1;
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'shufflemasking');
+select * from polar_masking.polar_masking_policy;
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'randommasking');
+select * from polar_masking.polar_masking_policy;
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'maskall');
+select * from test1;
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 5, 8, '[\d+]', 'z');
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+select * from test1;
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 2, 12, '[\d+]', 'z');
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+select * from test1;
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'creditcardmasking');
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+select * from test1;
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', -1, 12, '[\d+]', 'z');
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 1, -12, '[\d+]', 'z');
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 8, 4, '[\d+]', 'z');
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 0, 0, '[\d+]', 'z');
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+select * from test1;
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 0, 3, '[\d+]', 'z');
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+select * from test1;
+
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 10, 0, '[\d+]', 'z');
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+select * from test1;
+
 -- clear
 drop table test1;
 drop schema test_masking cascade;
