@@ -15,6 +15,7 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/parsenodes.h"
+#include "parser/parsetree.h"
 #include "rewrite/rewriteHandler.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
@@ -44,6 +45,7 @@ static void masking_process_targetlist(List **targetList, List *rtable);
 static void masking_process_select_query(Query *query);
 static void masking_process_selectcmd(Query *query);
 static void masking_process_after_rewrite(Query *query);
+static bool masking_process_union(Node *union_node, Query *query);
 
 /*
  * function for creating string node for masking function nodes' arg
@@ -445,6 +447,52 @@ masking_process_select_query(Query *query)
 }
 
 /*
+ * process select masking in union
+ */
+static bool
+masking_process_union(Node *union_node, Query *query)
+{
+	if (union_node == NULL)
+	{
+		return false;
+	}
+	switch (nodeTag(union_node))
+	{
+			/*
+			 * For union, recursively proecess masking
+			 */
+		case T_SetOperationStmt:
+			{
+				SetOperationStmt *stmt = (SetOperationStmt *) union_node;
+
+				if (stmt->op != SETOP_UNION)
+				{
+					return false;
+				}
+				masking_process_union((Node *) (stmt->larg), query);
+				masking_process_union((Node *) (stmt->rarg), query);
+			}
+			break;
+		case T_RangeTblRef:
+			{
+				RangeTblRef *ref = (RangeTblRef *) union_node;
+				Query	   *related_query;
+
+				if (ref->rtindex <= 0 || ref->rtindex > list_length(query->rtable))
+				{
+					return false;
+				}
+				related_query = rt_fetch(ref->rtindex, query->rtable)->subquery;
+				masking_process_select_query(related_query);
+			}
+			break;
+		default:
+			break;
+	}
+	return true;
+}
+
+/*
  * process masking for select
  */
 static void
@@ -455,7 +503,35 @@ masking_process_selectcmd(Query *query)
 		return;
 	}
 
-	masking_process_select_query(query);
+	/* process set-operation tree */
+	if (!masking_process_union(query->setOperations, query))
+	{
+		ListCell   *lc = NULL;
+
+		/* process query in cte */
+		if (query->cteList != NIL)
+		{
+			foreach(lc, query->cteList)
+			{
+				CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
+				Query	   *cte_query = (Query *) cte->ctequery;
+
+				masking_process_selectcmd(cte_query);
+			}
+		}
+		/* process each subquery */
+		if (query->rtable != NULL)
+		{
+			foreach(lc, query->rtable)
+			{
+				RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+				Query	   *subquery = (Query *) rte->subquery;
+
+				masking_process_selectcmd(subquery);
+			}
+		}
+		masking_process_select_query(query);
+	}
 }
 
 /*
@@ -469,6 +545,37 @@ masking_process_after_rewrite(Query *query)
 		case CMD_SELECT:
 			{
 				masking_process_selectcmd(query);
+				break;
+			}
+		case CMD_UPDATE:
+		case CMD_DELETE:
+		case CMD_INSERT:
+			{
+				if (query->rtable != NIL)
+				{
+					ListCell   *lc = NULL;
+
+					/* process INSERT/UPDATE/DELETE with RETURNING clause */
+					if (query->returningList != NIL)
+					{
+						masking_process_targetlist(&(query->returningList), query->rtable);
+					}
+
+					if (query->targetList != NIL)
+					{
+						masking_process_targetlist(&(query->targetList), query->rtable);
+					}
+
+					foreach(lc, query->rtable)
+					{
+						RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+
+						if (rte->rtekind == RTE_SUBQUERY && rte->subquery != NULL)
+						{
+							masking_process_targetlist(&(rte->subquery->targetList), rte->subquery->rtable);
+						}
+					}
+				}
 				break;
 			}
 		default:
