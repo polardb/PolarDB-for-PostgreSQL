@@ -138,7 +138,48 @@ select * from polar_masking.polar_masking_policy;
 select * from polar_masking.polar_masking_policy_regex;
 select * from test1;
 
+create view test_view as select * from test1;
+select * from test_view;
+select polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label1', 0, 0, '[\d+]', 'z');
+select * from test_view;
+
+select polar_masking.polar_masking_alter_label_maskingop('label1',  'none');
+select * from test_view;
+select * from test1;
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+
+select polar_masking.polar_masking_remove_table_from_label('label1', 'public','test1');
+select polar_masking.polar_masking_apply_label_to_column('label1', 'public','test1', 'b');
+select polar_masking.polar_masking_apply_label_to_column('label2', 'public','test1', 'c');
+
+select polar_masking.polar_masking_create_label('label3');
+select polar_masking.polar_masking_create_label('label4');
+select polar_masking.polar_masking_apply_label_to_column('label3', 'public','test1', 'd');
+select polar_masking.polar_masking_apply_label_to_column('label4', 'public','test1', 'e');
+
+select  polar_masking.polar_masking_alter_label_maskingop('label1',  'shufflemasking');
+select  polar_masking.polar_masking_alter_label_maskingop('label2',  'randommasking');
+select  polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label3', 5, 8, '[\d+]', 'abc');
+select  polar_masking.polar_masking_alter_label_maskingop('label4',  'maskall');
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+select a,d,e,f from test1;
+
+select  polar_masking.polar_masking_alter_label_maskingop('label1',  'creditcardmasking');
+select  polar_masking.polar_masking_alter_label_maskingop('label2',  'basicemailmasking');
+select  polar_masking.polar_masking_alter_label_maskingop('label3',  'fullemailmasking');
+select  polar_masking.polar_masking_alter_label_maskingop('label4',  'alldigitsmasking');
+select * from polar_masking.polar_masking_policy;
+select * from polar_masking.polar_masking_policy_regex;
+select * from test1;
+select * from test1 where b = '1111111@aaaa.com';
+select * from test1 where c = '1abc-1111-1d11-0d011';
+select * from test1 where d = '123456789';
+select * from test1 where e = 'abcdefg123';
+
 -- clear
+drop view test_view;
 drop table test1;
 drop schema test_masking cascade;
 drop extension polar_masking;
