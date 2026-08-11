@@ -797,6 +797,350 @@ select * from test1 where e = 'abcdefg123';
  5 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789 | abcdefg000 | c
 (2 rows)
 
+--complex query test
+insert into test_masking.test2 values(1, '112233@aa.com', '1997-01-01', 'xiaoming');
+insert into test_masking.test2 values(2, '112244@aa.com', '2000-01-01', 'xiaozhang1');
+insert into test_masking.test2 values(2, '112255@aa.com', '2000-01-02', 'xiaozhang2');
+insert into test_masking.test2 values(2, '1111111@aaaa.com', '2000-01-02', 'xiaozhang2');
+insert into test_masking.test2 values(3, '1111111@aaaa.com', '2000-01-03', 'xiaoyang');
+-- join ,subquery, cte
+select * from test1,test_masking.test2   where test1.a = test_masking.test2.a;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d      
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+------------
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a | 1 | 112233@aa.com    | 1997-01-01 | xiaoming
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 112244@aa.com    | 2000-01-01 | xiaozhang1
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 112255@aa.com    | 2000-01-02 | xiaozhang2
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+(5 rows)
+
+select * from test1 left join test_masking.test2 on test1.a = test_masking.test2.a;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d      
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+------------
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a | 1 | 112233@aa.com    | 1997-01-01 | xiaoming
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 112244@aa.com    | 2000-01-01 | xiaozhang1
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 112255@aa.com    | 2000-01-02 | xiaozhang2
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c |   |                  |            | 
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c |   |                  |            | 
+(7 rows)
+
+select * from test1 left join test_masking.test2 on test1.b = test_masking.test2.b;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d      
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+------------
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a |   |                  |            | 
+(9 rows)
+
+select * from test1 right join test_masking.test2 on test1.b = test_masking.test2.b;
+ a |        b         |          c           |           d            |     e      | f | a |        b         |     c      |     d      
+---+------------------+----------------------+------------------------+------------+---+---+------------------+------------+------------
+   |                  |                      |                        |            |   | 1 | 112233@aa.com    | 1997-01-01 | xiaoming
+   |                  |                      |                        |            |   | 2 | 112244@aa.com    | 2000-01-01 | xiaozhang1
+   |                  |                      |                        |            |   | 2 | 112255@aa.com    | 2000-01-02 | xiaozhang2
+ 5 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 4 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 3 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 111111111              | abcdefg    | 4 | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 2 | xxxxxxx@aaaa.com | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com | b | 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2
+ 5 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+ 4 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+ 3 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 111111111              | abcdefg    | 4 | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+ 2 | xxxxxxx@aaaa.com | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com | b | 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang
+(11 rows)
+
+select a.a, b.* from test_masking.test2 a, (select * from test1) as b where a.a = b.a;
+ a | a |          b          |          c           |           d            |          e          | f 
+---+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a
+ 2 | 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b
+ 2 | 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b
+ 2 | 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b
+ 3 | 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4
+(5 rows)
+
+select *, (select b from test1 where a = 1) from test_masking.test2;
+ a |        b         |     c      |     d      |          b          
+---+------------------+------------+------------+---------------------
+ 1 | 112233@aa.com    | 1997-01-01 | xiaoming   | xxxx-xxxx-xxxx-0011
+ 2 | 112244@aa.com    | 2000-01-01 | xiaozhang1 | xxxx-xxxx-xxxx-0011
+ 2 | 112255@aa.com    | 2000-01-02 | xiaozhang2 | xxxx-xxxx-xxxx-0011
+ 2 | 1111111@aaaa.com | 2000-01-02 | xiaozhang2 | xxxx-xxxx-xxxx-0011
+ 3 | 1111111@aaaa.com | 2000-01-03 | xiaoyang   | xxxx-xxxx-xxxx-0011
+(5 rows)
+
+select * from test1 where b = (select b from  test_masking.test2 where a = 3);
+ a |        b         |          c           |           d            |     e      | f 
+---+------------------+----------------------+------------------------+------------+---
+ 2 | xxxxxxx@aaaa.com | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com | b
+ 3 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 111111111              | abcdefg    | 4
+ 4 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c
+ 5 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c
+(4 rows)
+
+select polar_masking.polar_masking_create_label('label5');
+ polar_masking_create_label 
+----------------------------
+ 
+(1 row)
+
+select polar_masking.polar_masking_apply_label_to_table('label5', 'test_masking','test2');
+ polar_masking_apply_label_to_table 
+------------------------------------
+ 
+(1 row)
+
+select  polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label5', 0, 0, '[\d+]', '*');
+ polar_masking_alter_label_maskingop_set_regexpmasking 
+-------------------------------------------------------
+ 
+(1 row)
+
+select * from test1,test_masking.test2   where test1.a = test_masking.test2.a;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d      
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+------------
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a | 1 | ******@aa.com    | ****-**-** | xiaoming
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | ******@aa.com    | ****-**-** | xiaozhang*
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | ******@aa.com    | ****-**-** | xiaozhang*
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+(5 rows)
+
+select * from test1 left join test_masking.test2 on test1.a = test_masking.test2.a;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d      
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+------------
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a | 1 | ******@aa.com    | ****-**-** | xiaoming
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | ******@aa.com    | ****-**-** | xiaozhang*
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | ******@aa.com    | ****-**-** | xiaozhang*
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c |   |                  |            | 
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c |   |                  |            | 
+(7 rows)
+
+select * from test1 left join test_masking.test2 on test1.b = test_masking.test2.b;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d      
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+------------
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a |   |                  |            | 
+(9 rows)
+
+select * from test1 right join test_masking.test2 on test1.b = test_masking.test2.b;
+ a |        b         |          c           |           d            |     e      | f | a |        b         |     c      |     d      
+---+------------------+----------------------+------------------------+------------+---+---+------------------+------------+------------
+   |                  |                      |                        |            |   | 1 | ******@aa.com    | ****-**-** | xiaoming
+   |                  |                      |                        |            |   | 2 | ******@aa.com    | ****-**-** | xiaozhang*
+   |                  |                      |                        |            |   | 2 | ******@aa.com    | ****-**-** | xiaozhang*
+ 5 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 4 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 3 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 111111111              | abcdefg    | 4 | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 2 | xxxxxxx@aaaa.com | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com | b | 2 | *******@aaaa.com | ****-**-** | xiaozhang*
+ 5 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+ 4 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+ 3 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 111111111              | abcdefg    | 4 | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+ 2 | xxxxxxx@aaaa.com | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com | b | 3 | *******@aaaa.com | ****-**-** | xiaoyang
+(11 rows)
+
+select a.a, b.* from test_masking.test2 a, (select * from test1) as b where a.a = b.a;
+ a | a |          b          |          c           |           d            |          e          | f 
+---+---+---------------------+----------------------+------------------------+---------------------+---
+ 1 | 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a
+ 2 | 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b
+ 2 | 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b
+ 2 | 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b
+ 3 | 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4
+(5 rows)
+
+select *, (select b from test1 where a = 1) from test_masking.test2;
+ a |        b         |     c      |     d      |          b          
+---+------------------+------------+------------+---------------------
+ 1 | ******@aa.com    | ****-**-** | xiaoming   | xxxx-xxxx-xxxx-0011
+ 2 | ******@aa.com    | ****-**-** | xiaozhang* | xxxx-xxxx-xxxx-0011
+ 2 | ******@aa.com    | ****-**-** | xiaozhang* | xxxx-xxxx-xxxx-0011
+ 2 | *******@aaaa.com | ****-**-** | xiaozhang* | xxxx-xxxx-xxxx-0011
+ 3 | *******@aaaa.com | ****-**-** | xiaoyang   | xxxx-xxxx-xxxx-0011
+(5 rows)
+
+select  polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label5', 0, 0, '(?<=xiao).{4}', '***');
+ polar_masking_alter_label_maskingop_set_regexpmasking 
+-------------------------------------------------------
+ 
+(1 row)
+
+select * from test1,test_masking.test2   where test1.a = test_masking.test2.a;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d     
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+-----------
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a | 1 | 112233@aa.com    | 1997-01-01 | xiao***
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 112244@aa.com    | 2000-01-01 | xiao***g1
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 112255@aa.com    | 2000-01-02 | xiao***g2
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+(5 rows)
+
+select * from test1 left join test_masking.test2 on test1.a = test_masking.test2.a;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d     
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+-----------
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a | 1 | 112233@aa.com    | 1997-01-01 | xiao***
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 112244@aa.com    | 2000-01-01 | xiao***g1
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 112255@aa.com    | 2000-01-02 | xiao***g2
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c |   |                  |            | 
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c |   |                  |            | 
+(7 rows)
+
+select * from test1 left join test_masking.test2 on test1.b = test_masking.test2.b;
+ a |          b          |          c           |           d            |          e          | f | a |        b         |     c      |     d     
+---+---------------------+----------------------+------------------------+---------------------+---+---+------------------+------------+-----------
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000          | c | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111              | abcdefg             | 4 | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com          | b | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a | a |   |                  |            | 
+(9 rows)
+
+select * from test1 right join test_masking.test2 on test1.b = test_masking.test2.b;
+ a |        b         |          c           |           d            |     e      | f | a |        b         |     c      |     d     
+---+------------------+----------------------+------------------------+------------+---+---+------------------+------------+-----------
+   |                  |                      |                        |            |   | 1 | 112233@aa.com    | 1997-01-01 | xiao***
+   |                  |                      |                        |            |   | 2 | 112244@aa.com    | 2000-01-01 | xiao***g1
+   |                  |                      |                        |            |   | 2 | 112255@aa.com    | 2000-01-02 | xiao***g2
+ 5 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 4 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 3 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 111111111              | abcdefg    | 4 | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 2 | xxxxxxx@aaaa.com | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com | b | 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 5 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 4 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 123456789              | abcdefg000 | c | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 3 | xxxxxxx@aaaa.com | 1abc-1111-1d11-0d011 | 111111111              | abcdefg    | 4 | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 2 | xxxxxxx@aaaa.com | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com | d@a000.com | b | 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+(11 rows)
+
+with test_cte as (select * from test_masking.test2) select * from test_cte;
+ a |        b         |     c      |     d     
+---+------------------+------------+-----------
+ 1 | 112233@aa.com    | 1997-01-01 | xiao***
+ 2 | 112244@aa.com    | 2000-01-01 | xiao***g1
+ 2 | 112255@aa.com    | 2000-01-02 | xiao***g2
+ 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+(5 rows)
+
+-- union
+(select a,b,c,d from test1) union all (select * from test_masking.test2);
+ a |          b          |          c           |           d            
+---+---------------------+----------------------+------------------------
+ 1 | xxxx-xxxx-xxxx-0011 | abc-1111-1111-0011   | abc-1111-1111-@1aa
+ 2 | xxxxxxx@aaaa.com    | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com
+ 3 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 111111111
+ 4 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789
+ 5 | xxxxxxx@aaaa.com    | 1abc-1111-1d11-0d011 | 123456789
+ 1 | 112233@aa.com       | 1997-01-01           | xiao***
+ 2 | 112244@aa.com       | 2000-01-01           | xiao***g1
+ 2 | 112255@aa.com       | 2000-01-02           | xiao***g2
+ 2 | 1111111@aaaa.com    | 2000-01-02           | xiao***g2
+ 3 | 1111111@aaaa.com    | 2000-01-03           | xiao***
+(10 rows)
+
+(select a,b,c,d from test1) union all (select * from test_masking.test2) union all (select a,d,e,f from test1) ;
+ a |           b            |          c           |           d            
+---+------------------------+----------------------+------------------------
+ 1 | xxxx-xxxx-xxxx-0011    | abc-1111-1111-0011   | abc-1111-1111-@1aa
+ 2 | xxxxxxx@aaaa.com       | xxxxxxxx@aaaa.com    | xxxxxxxxxxxx@xxxxx.com
+ 3 | xxxxxxx@aaaa.com       | 1abc-1111-1d11-0d011 | 111111111
+ 4 | xxxxxxx@aaaa.com       | 1abc-1111-1d11-0d011 | 123456789
+ 5 | xxxxxxx@aaaa.com       | 1abc-1111-1d11-0d011 | 123456789
+ 1 | 112233@aa.com          | 1997-01-01           | xiao***
+ 2 | 112244@aa.com          | 2000-01-01           | xiao***g1
+ 2 | 112255@aa.com          | 2000-01-02           | xiao***g2
+ 2 | 1111111@aaaa.com       | 2000-01-02           | xiao***g2
+ 3 | 1111111@aaaa.com       | 2000-01-03           | xiao***
+ 1 | abc-1111-1111-@1aa     | abbcc-xx-addd-@aa.a  | a
+ 2 | xxxxxxxxxxxx@xxxxx.com | d@a000.com           | b
+ 3 | 111111111              | abcdefg              | 4
+ 4 | 123456789              | abcdefg000           | c
+ 5 | 123456789              | abcdefg000           | c
+(15 rows)
+
+-- agg
+select string_agg(d, '---') from  test_masking.test2;
+                      string_agg                       
+-------------------------------------------------------
+ xiao***---xiao***g1---xiao***g2---xiao***g2---xiao***
+(1 row)
+
+select array_agg(d) from test_masking.test2;
+                    array_agg                    
+-------------------------------------------------
+ {xiao***,xiao***g1,xiao***g2,xiao***g2,xiao***}
+(1 row)
+
+select array_agg(distinct d) from test_masking.test2;
+           array_agg           
+-------------------------------
+ {xiao***,xiao***g1,xiao***g2}
+(1 row)
+
+-- window
+select d, row_number() over (partition by d order by d desc) as rank_row_number from test_masking.test2;
+     d     | rank_row_number 
+-----------+-----------------
+ xiao***g2 |               1
+ xiao***g2 |               2
+ xiao***g1 |               1
+ xiao***   |               1
+ xiao***   |               2
+(5 rows)
+
+-- returning clause
+insert into test_masking.test2 values(4, '1111111@aaaa.com', '2000-01-03', 'xiaoyang') returning b, c, d;
+        b         |     c      |    d    
+------------------+------------+---------
+ 1111111@aaaa.com | 2000-01-03 | xiao***
+(1 row)
+
+update test_masking.test2 set b = '11' where a = 4 returning b, c, d;
+ b  |     c      |    d    
+----+------------+---------
+ 11 | 2000-01-03 | xiao***
+(1 row)
+
+delete from test_masking.test2 where a = 4 returning b, c, d;
+ b  |     c      |    d    
+----+------------+---------
+ 11 | 2000-01-03 | xiao***
+(1 row)
+
+-- insert subquery
+insert into test_masking.test2(a,b) select a,b from test1 where a = 5; 
+select * from test_masking.test2;
+ a |        b         |     c      |     d     
+---+------------------+------------+-----------
+ 1 | 112233@aa.com    | 1997-01-01 | xiao***
+ 2 | 112244@aa.com    | 2000-01-01 | xiao***g1
+ 2 | 112255@aa.com    | 2000-01-02 | xiao***g2
+ 2 | 1111111@aaaa.com | 2000-01-02 | xiao***g2
+ 3 | 1111111@aaaa.com | 2000-01-03 | xiao***
+ 5 | xxxxxxx@aaaa.com |            | 
+(6 rows)
+
 -- clear
 drop view test_view;
 drop table test1;
