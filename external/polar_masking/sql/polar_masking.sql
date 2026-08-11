@@ -178,6 +178,65 @@ select * from test1 where c = '1abc-1111-1d11-0d011';
 select * from test1 where d = '123456789';
 select * from test1 where e = 'abcdefg123';
 
+--complex query test
+insert into test_masking.test2 values(1, '112233@aa.com', '1997-01-01', 'xiaoming');
+insert into test_masking.test2 values(2, '112244@aa.com', '2000-01-01', 'xiaozhang1');
+insert into test_masking.test2 values(2, '112255@aa.com', '2000-01-02', 'xiaozhang2');
+insert into test_masking.test2 values(2, '1111111@aaaa.com', '2000-01-02', 'xiaozhang2');
+insert into test_masking.test2 values(3, '1111111@aaaa.com', '2000-01-03', 'xiaoyang');
+
+-- join ,subquery, cte
+select * from test1,test_masking.test2   where test1.a = test_masking.test2.a;
+select * from test1 left join test_masking.test2 on test1.a = test_masking.test2.a;
+select * from test1 left join test_masking.test2 on test1.b = test_masking.test2.b;
+select * from test1 right join test_masking.test2 on test1.b = test_masking.test2.b;
+
+select a.a, b.* from test_masking.test2 a, (select * from test1) as b where a.a = b.a;
+select *, (select b from test1 where a = 1) from test_masking.test2;
+select * from test1 where b = (select b from  test_masking.test2 where a = 3);
+
+
+select polar_masking.polar_masking_create_label('label5');
+select polar_masking.polar_masking_apply_label_to_table('label5', 'test_masking','test2');
+select  polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label5', 0, 0, '[\d+]', '*');
+
+select * from test1,test_masking.test2   where test1.a = test_masking.test2.a;
+select * from test1 left join test_masking.test2 on test1.a = test_masking.test2.a;
+select * from test1 left join test_masking.test2 on test1.b = test_masking.test2.b;
+select * from test1 right join test_masking.test2 on test1.b = test_masking.test2.b;
+
+select a.a, b.* from test_masking.test2 a, (select * from test1) as b where a.a = b.a;
+select *, (select b from test1 where a = 1) from test_masking.test2;
+
+select  polar_masking.polar_masking_alter_label_maskingop_set_regexpmasking('label5', 0, 0, '(?<=xiao).{4}', '***');
+select * from test1,test_masking.test2   where test1.a = test_masking.test2.a;
+select * from test1 left join test_masking.test2 on test1.a = test_masking.test2.a;
+select * from test1 left join test_masking.test2 on test1.b = test_masking.test2.b;
+select * from test1 right join test_masking.test2 on test1.b = test_masking.test2.b;
+
+with test_cte as (select * from test_masking.test2) select * from test_cte;
+
+-- union
+(select a,b,c,d from test1) union all (select * from test_masking.test2);
+(select a,b,c,d from test1) union all (select * from test_masking.test2) union all (select a,d,e,f from test1) ;
+
+-- agg
+select string_agg(d, '---') from  test_masking.test2;
+select array_agg(d) from test_masking.test2;
+select array_agg(distinct d) from test_masking.test2;
+
+-- window
+select d, row_number() over (partition by d order by d desc) as rank_row_number from test_masking.test2;
+
+-- returning clause
+insert into test_masking.test2 values(4, '1111111@aaaa.com', '2000-01-03', 'xiaoyang') returning b, c, d;
+update test_masking.test2 set b = '11' where a = 4 returning b, c, d;
+delete from test_masking.test2 where a = 4 returning b, c, d;
+
+-- insert subquery
+insert into test_masking.test2(a,b) select a,b from test1 where a = 5; 
+select * from test_masking.test2;
+
 -- clear
 drop view test_view;
 drop table test1;
