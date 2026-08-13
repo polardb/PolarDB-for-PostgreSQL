@@ -91,7 +91,7 @@ postgres=# SELECT version();
 
 ## Star 历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=polardb/PolarDB-for-PostgreSQL&type=Date)](https://star-history.com/#polardb/PolarDB-for-PostgreSQL&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=polardb/PolarDB-for-PostgreSQL&type=Date)](https://star-history.dera.page/#polardb/PolarDB-for-PostgreSQL&Date)
 
 ## 软件许可
 

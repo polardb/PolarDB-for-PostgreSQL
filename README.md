@@ -93,7 +93,7 @@ Made with [contrib.rocks](https://contrib.rocks).
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=polardb/PolarDB-for-PostgreSQL&type=Date)](https://star-history.com/#polardb/PolarDB-for-PostgreSQL&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=polardb/PolarDB-for-PostgreSQL&type=Date)](https://star-history.dera.page/#polardb/PolarDB-for-PostgreSQL&Date)
 
 ## Software License
 
