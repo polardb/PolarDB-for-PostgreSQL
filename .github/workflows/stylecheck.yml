@@ -14,7 +14,7 @@ jobs:
         container_image: [ anolis8 ]
     steps:
       - name: fetch source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         # for copyright check
         with:
           fetch-depth: 0

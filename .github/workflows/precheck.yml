@@ -28,13 +28,14 @@ jobs:
   regression:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         container_image: [ rocky8, rocky9, ubuntu22.04 ]
         rules: [ precheck-main, plcheck ]
         debug_mode: [ on, off ]
     steps:
       - name: fetch source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: free disk space
         run: |

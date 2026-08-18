@@ -29,7 +29,7 @@ jobs:
     runs-on: ${{ matrix.arch }}
     steps:
       - name: fetch source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: create and start the container
         run: |
           docker create                                                    \
@@ -59,7 +59,7 @@ jobs:
           echo "rpmpath=$RPMPATH/$RPMNAME" >> $GITHUB_ENV
       - name: upload artifact
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.rpmname }}
           path: ${{ env.rpmpath }}
@@ -76,7 +76,7 @@ jobs:
     runs-on: ${{ matrix.arch }}
     steps:
       - name: fetch source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: create and start the container
         run: |
           docker create                                                    \
@@ -102,7 +102,7 @@ jobs:
           cd ./package/debian && DEBNAME=`ls *.deb` && echo "debname=$DEBNAME" >> $GITHUB_ENV
       - name: upload artifact
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.debname }}
           path: ./package/debian/${{ env.debname }}
@@ -117,13 +117,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: |
             *.{rpm,deb}
           merge-multiple: true
       - name: upload artifacts to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             *.rpm
