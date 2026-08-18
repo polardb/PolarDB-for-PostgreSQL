@@ -929,6 +929,7 @@ polar_read_core_pattern(const char *core_pattern_path, char *core_file_path)
 	{
 		ereport(LOG, (errcode_for_file_access(),
 					  errmsg("could not read file \"%s\".", core_pattern_path)));
+		close(fd);
 		return false;
 	}
 
