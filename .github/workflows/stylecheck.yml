@@ -24,7 +24,7 @@ jobs:
         container_image: [ rocky8 ]
     steps:
       - name: fetch source code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         # for copyright check
         with:
           fetch-depth: 0

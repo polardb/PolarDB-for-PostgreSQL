@@ -9,7 +9,7 @@ jobs:
   repo-sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           token: ${{ secrets.GITHUB_TOKEN }}
