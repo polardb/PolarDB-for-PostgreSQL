@@ -891,6 +891,12 @@ ecpg_store_input(const int lineno, const bool force_indicator, const struct vari
 						}
 
 						str = PGTYPESnumeric_to_asc(nval, nval->dscale);
+						if (!str)
+						{
+							PGTYPESnumeric_free(nval);
+							ecpg_free(mallocedval);
+							return false;
+						}
 						slen = strlen(str);
 						PGTYPESnumeric_free(nval);
 
