@@ -202,6 +202,7 @@ dbgcomm_connect_to_proxy(int proxyPort)
 		ereport(COMMERROR,
 				(errcode_for_socket_access(),
 				 errmsg("could not bind local port: %m")));
+		closesocket(sockfd);
 		return -1;
 	}
 	/* Get the port number selected by the TCP/IP stack */
@@ -295,6 +296,7 @@ dbgcomm_listen_for_proxy(void)
 		ereport(COMMERROR,
 				(errcode_for_socket_access(),
 				 errmsg("could not bind socket for listening for proxy: %m")));
+		closesocket(sockfd);
 		return -1;
 	}
 
