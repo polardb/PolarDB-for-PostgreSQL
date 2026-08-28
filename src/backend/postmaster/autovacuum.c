@@ -108,7 +108,7 @@
 #include "utils/syscache.h"
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
-
+#include <math.h>
 
 /*
  * GUC parameters
@@ -3165,9 +3165,9 @@ relation_needs_vacanalyze(Oid relid,
 		if (reltuples < 0)
 			reltuples = 0;
 
-		vacthresh = (float4) vac_base_thresh + vac_scale_factor * reltuples;
+		vacthresh = (float4) fmin(vac_base_thresh + vac_scale_factor * reltuples, vac_base_thresh + vac_scale_factor * sqrt(reltuples) * 1000.0 );
 		vacinsthresh = (float4) vac_ins_base_thresh + vac_ins_scale_factor * reltuples;
-		anlthresh = (float4) anl_base_thresh + anl_scale_factor * reltuples;
+		anlthresh = (float4) fmin(anl_base_thresh + anl_scale_factor * reltuples ,anl_base_thresh + anl_scale_factor * sqrt(reltuples) * 1000.0 );
 
 		/*
 		 * Note that we don't need to take special consideration for stat
