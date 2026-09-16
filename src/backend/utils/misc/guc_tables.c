@@ -20,6 +20,7 @@
  *--------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "storage/pg_numa.h"
 
 #include <float.h>
 #include <limits.h>
@@ -5972,6 +5973,20 @@ struct config_real ConfigureNamesReal[] =
 
 struct config_string ConfigureNamesString[] =
 {
+	{
+		{"numa", PGC_POSTMASTER, RESOURCES_MEM,
+			gettext_noop("Selects the NUMA placement policy for the shared memory segment."),
+			gettext_noop("\"off\" (default) keeps the kernel first-touch policy; \"all\" "
+						"interleaves the segment across every NUMA node; \"@<nodes>\" binds it "
+						"to the listed nodes and \"=<nodes>\" prefers them.  Use \"all\" to "
+						"avoid exhausting a single NUMA node's local memory under large "
+						"shared_buffers."),
+			0
+	},
+	&NumaShmem,
+	"off",
+	check_numa_shmem, NULL, NULL
+	},
 	/* POLAR string GUCs start */
 
 	{
