@@ -24,6 +24,9 @@
 #ifdef HAVE_LIBNUMA
 #include <numa.h>
 #include <numaif.h>
+#ifndef MPOL_DEFAULT
+#define MPOL_DEFAULT 0
+#endif
 #endif
 
 char	   *NumaShmem = "off";
@@ -127,5 +130,16 @@ pg_numa_apply_shmem_policy(void *addr, Size size)
 		mbind(addr, aligned_size, MPOL_PREFERRED, mask->maskp, mask->size, 0);
 		numa_bitmask_free(mask);
 	}
+
+	/*
+	 * The VMA policy above pins the shared segment's placement, but the
+	 * process-wide (task) policy is still whatever the launcher set.  If the
+	 * instance was started via "numactl --interleave=all", that task policy
+	 * would also spread every backend's private memory (hash tables, sorts,
+	 * work_mem) across nodes, hurting locality for no benefit.  Reset it to
+	 * MPOL_DEFAULT so only the shared segment is interleaved.
+	 */
+	if (set_mempolicy(MPOL_DEFAULT, NULL, 0) != 0)
+		elog(WARNING, "set_mempolicy(MPOL_DEFAULT) failed: %m");
 #endif							/* HAVE_LIBNUMA */
 }
