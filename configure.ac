@@ -1580,6 +1580,17 @@ AC_SUBST(UUID_LIBS)
 ## Header files
 ##
 
+# NUMA support (libnuma) -- interleave shared memory across NUMA nodes
+PGAC_ARG_BOOL(with, numa, yes, [build with NUMA support],
+			[build with NUMA support (libnuma) for shared memory interleaving])
+if test "$with_numa" = yes; then
+	AC_CHECK_LIB(numa, numa_available,
+		[AC_CHECK_HEADERS(numa.h,
+			[AC_DEFINE([HAVE_LIBNUMA], 1,
+				[Define to 1 if libnuma is available for NUMA-aware shared memory placement])])],
+		[AC_MSG_WARN([library "numa" (libnuma) not found; NUMA support disabled])])
+fi
+
 AC_CHECK_HEADERS(m4_normalize([
 	atomic.h
 	copyfile.h
