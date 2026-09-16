@@ -1581,6 +1581,14 @@ if not zstdopt.disabled()
 
 else
   zstd = not_found_dep
+
+numa = not_found_dep
+numa_lib = cc.find_library('numa', required: false)
+if numa_lib.found()
+  numa = numa_lib
+  cdata.set('HAVE_LIBNUMA', 1)
+endif
+
 endif
 
 
@@ -3197,6 +3205,7 @@ backend_both_deps += [
   systemd,
   zlib,
   zstd,
+  numa,
 ]
 
 backend_mod_deps = backend_both_deps + os_deps

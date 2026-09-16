@@ -34,6 +34,7 @@
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pg_shmem.h"
+#include "storage/pg_numa.h"
 #include "utils/guc.h"
 #include "utils/guc_hooks.h"
 #include "utils/pidfile.h"
@@ -838,6 +839,19 @@ PGSharedMemoryCreate(Size size,
 		if (oldhdr && shmdt((void *) oldhdr) < 0)
 			elog(LOG, "shmdt(%p) failed: %m", oldhdr);
 	}
+
+	/*
+	 * Spread the main shared memory segment across NUMA nodes according to
+	 * the "numa" GUC.  By default the kernel uses a first-touch policy, so
+	 * every page is faulted onto the postmaster's local NUMA node; under a
+	 * large shared_buffers that node's local memory can be exhausted (OOM)
+	 * while other nodes stay idle.  Apply the policy before the segment is
+	 * first touched.
+	 */
+	if (AnonymousShmem != NULL)
+		pg_numa_apply_shmem_policy(AnonymousShmem, size);
+	else
+		pg_numa_apply_shmem_policy(memAddress, sysvsize);
 
 	/* Initialize new segment. */
 	hdr = (PGShmemHeader *) memAddress;
