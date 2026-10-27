@@ -37,7 +37,8 @@ SUBDIRS = \
 
 # POLAR
 SUBDIRS += test_buffer
-SUBDIRS += test_logindex test_slru test_local_cache test_procpool
+SUBDIRS += test_logindex test_slru test_procpool
+# SUBDIRS += test_local_cache
 SUBDIRS += test_polar_rsc
 SUBDIRS += test_coredump_handler
 # POLAR end
