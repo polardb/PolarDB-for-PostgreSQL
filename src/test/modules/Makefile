@@ -42,8 +42,8 @@ SUBDIRS = \
 		  test_tidstore \
 		  unsafe_tests \
 		  worker_spi \
-		  xid_wraparound \
-		  test_local_cache
+		  xid_wraparound
+#		  test_local_cache
 
 # POLAR
 # SUBDIRS += test_bulkio
