@@ -629,6 +629,9 @@ pg_flush_data(int fd, off_t offset, off_t nbytes)
 
 		if (rc != 0)
 		{
+			/* update errno for %m et al */
+			errno = rc;
+
 			/* don't error out, this is just a performance optimization */
 			ereport(WARNING,
 					(errcode_for_file_access(),
@@ -2094,7 +2097,7 @@ FilePrefetch(File file, off_t offset, off_t amount, uint32 wait_event_info)
 
 	returnCode = FileAccess(file);
 	if (returnCode < 0)
-		return returnCode;
+		return errno;
 
 	pgstat_report_wait_start(wait_event_info);
 	returnCode = polar_posix_fadvise(VfdCache[file].fd, offset, amount,

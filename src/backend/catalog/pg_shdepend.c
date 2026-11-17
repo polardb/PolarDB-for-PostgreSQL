@@ -1156,15 +1156,14 @@ classIdGetDbId(Oid classId)
 /*
  * shdepLockAndCheckObject
  *
- * Lock the object that we are about to record a dependency on.
- * After it's locked, verify that it hasn't been dropped while we
- * weren't looking.  If the object has been dropped, this function
- * does not return!
+ * Acquire an AccessShareLock on a shared object and verify that it still
+ * exists.  This is used when recording a dependency or performing another
+ * operation that must protect the object against a concurrent DROP.
  */
 void
 shdepLockAndCheckObject(Oid classId, Oid objectId)
 {
-	/* AccessShareLock should be OK, since we are not modifying the object */
+	/* AccessShareLock is sufficient to prevent a concurrent DROP. */
 	LockSharedObject(classId, objectId, 0, AccessShareLock);
 
 	switch (classId)
@@ -1365,6 +1364,23 @@ shdepDropOwned(List *roleids, DropBehavior behavior)
 					elog(ERROR, "unexpected dependency type");
 					break;
 				case SHARED_DEPENDENCY_ACL:
+
+					/*
+					 * Lock tablespaces before updating their catalog tuple.
+					 */
+					if (sdepForm->classid == TableSpaceRelationId)
+					{
+						LockSharedObject(sdepForm->classid,
+										 sdepForm->objid, 0,
+										 AccessShareLock);
+						if (!systable_recheck_tuple(scan, tuple))
+						{
+							UnlockSharedObject(sdepForm->classid,
+											   sdepForm->objid, 0,
+											   AccessShareLock);
+							break;
+						}
+					}
 					RemoveRoleFromObjectACL(roleid,
 											sdepForm->classid,
 											sdepForm->objid);
@@ -1372,8 +1388,8 @@ shdepDropOwned(List *roleids, DropBehavior behavior)
 				case SHARED_DEPENDENCY_POLICY:
 
 					/*
-					 * Try to remove role from policy; if unable to, remove
-					 * policy.
+					 * Try to remove role from policy; if that would leave the
+					 * policy with no roles, remove the policy.
 					 */
 					if (!RemoveRoleFromObjectPolicy(roleid,
 													sdepForm->classid,
@@ -1579,6 +1595,13 @@ shdepReassignOwned(List *roleids, Oid newrole)
 					break;
 
 					/* Generic alter owner cases */
+				case DatabaseRelationId:
+					/* mirror AlterDatabaseOwner() privilege check */
+					if (roleid != newrole && !have_createdb_privilege())
+						ereport(ERROR,
+								(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+								 errmsg("permission denied to change owner of database")));
+					/* fall through */
 				case CollationRelationId:
 				case ConversionRelationId:
 				case OperatorRelationId:
@@ -1590,13 +1613,32 @@ shdepReassignOwned(List *roleids, Oid newrole)
 				case ExtensionRelationId:
 				case StatisticExtRelationId:
 				case TableSpaceRelationId:
-				case DatabaseRelationId:
 				case TSConfigRelationId:
 				case TSDictionaryRelationId:
 					{
 						Oid			classId = sdepForm->classid;
 						Relation	catalog;
 
+						/*
+						 * Lock tablespaces before updating their catalog
+						 * tuple.
+						 */
+						if (classId == TableSpaceRelationId)
+						{
+							LockSharedObject(classId, sdepForm->objid, 0,
+											 AccessShareLock);
+							if (!systable_recheck_tuple(scan, tuple))
+							{
+								UnlockSharedObject(classId, sdepForm->objid, 0,
+												   AccessShareLock);
+								break;
+							}
+						}
+
+						/*
+						 * For large objects, the catalog to modify is
+						 * pg_largeobject_metadata
+						 */
 						if (classId == LargeObjectRelationId)
 							classId = LargeObjectMetadataRelationId;
 

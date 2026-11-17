@@ -1588,6 +1588,22 @@ ExecCloseResultRelations(EState *estate)
 		}
 	}
 
+	/*
+	 * Now close any relations that we opened for trigger target
+	 * ResultRelInfos.
+	 */
+	ExecCloseTrigTargetRelations(estate);
+}
+
+/*
+ * Close any relations that have been opened for ResultRelInfos opened
+ * specifically for trigger target relations.
+ */
+void
+ExecCloseTrigTargetRelations(EState *estate)
+{
+	ListCell   *l;
+
 	/* Close any relations that have been opened by ExecGetTriggerResultRel(). */
 	foreach(l, estate->es_trig_target_relations)
 	{
@@ -2186,6 +2202,12 @@ ExecWithCheckOptions(WCOKind kind, ResultRelInfo *resultRelInfo,
 									wco->relname),
 							 val_desc ? errdetail("Failing row contains %s.",
 												  val_desc) : 0));
+					break;
+				case WCO_VIEW_CONFLICT_CHECK:
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("conflicting row is not visible through view \"%s\"",
+									wco->relname)));
 					break;
 				case WCO_RLS_INSERT_CHECK:
 				case WCO_RLS_UPDATE_CHECK:

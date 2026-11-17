@@ -940,6 +940,7 @@ extern int	polar_release_assert_level;
 #define AssertArg(condition) assert(condition)
 #define AssertState(condition) assert(condition)
 #define AssertPointerAlignment(ptr, bndr)	((void)true)
+#define TrapMacro(condition, errorType) (true)
 
 #else							/* USE_ASSERT_CHECKING && !FRONTEND */
 
@@ -1526,6 +1527,7 @@ extern int	__backtrace(void **__array, int __size);
  * setjmp.  We now support the case only on Windows.  However, it seems
  * that MinGW-64 has some longstanding issues in its setjmp support,
  * so on that toolchain we cheat and use gcc's builtins.
+ * If you change this, see also PG_PERL_TRY in plperl.h.
  */
 #ifdef WIN32
 #ifdef __MINGW64__

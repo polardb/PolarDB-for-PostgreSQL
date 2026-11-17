@@ -3832,6 +3832,19 @@ recomputeNamespacePath(void)
 		char	   *curname = (char *) lfirst(l);
 		Oid			namespaceId;
 
+		/*
+		 * Any future special names like $user should have a pg_ prefix.  That
+		 * way, they can't conflict with any real schema that one can create
+		 * without allow_system_table_mods.  See also
+		 * extension_search_path_element_check().
+		 *
+		 * There's no SQL for constructing a search_path that locates or
+		 * creates objects in nspname='$user', and nspname='$user' has scant
+		 * practical use beyond designing security breaches.  A future major
+		 * release should reject nspname='$user' at CREATE and at ALTER SCHEMA
+		 * RENAME.  Until then, PostgreSQL code cannot assume the ability to
+		 * construct a search_path containing an arbitrary object's schema.
+		 */
 		if (strcmp(curname, "$user") == 0)
 		{
 			/* $user --- substitute namespace matching user name, if any */
@@ -4300,7 +4313,15 @@ RemoveTempRelationsCallback(int code, Datum arg)
 		/* Need to ensure we have a usable transaction. */
 		AbortOutOfAnyTransaction();
 		StartTransactionCommand();
-		PushActiveSnapshot(GetTransactionSnapshot());
+
+		/*
+		 * Need an active snapshot for toast fetches during deletion.  Do not
+		 * use GetTransactionSnapshot(): under SERIALIZABLE READ ONLY
+		 * DEFERRABLE it may wait in GetSafeSnapshot(), and proc_exit holds
+		 * off interrupts so that wait cannot be cancelled.  A catalog
+		 * snapshot is enough and avoids that path.
+		 */
+		PushActiveSnapshot(GetCatalogSnapshot(RelationRelationId));
 
 		RemoveTempRelations(myTempNamespace);
 

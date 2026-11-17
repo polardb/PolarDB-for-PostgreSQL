@@ -220,7 +220,7 @@ typedef struct PGOutputTxnData
 static HTAB *RelationSyncCache = NULL;
 
 static void init_rel_sync_cache(MemoryContext decoding_context);
-static void cleanup_rel_sync_cache(TransactionId xid, bool is_commit);
+static void cleanup_rel_sync_cache(TransactionId xid, bool mark_schema_sent);
 static RelationSyncEntry *get_rel_sync_entry(PGOutputData *data,
 											 Relation relation);
 static void rel_sync_cache_relation_cb(Datum arg, Oid relid);
@@ -312,6 +312,7 @@ parse_output_parameters(List *options, PGOutputData *data)
 		{
 			unsigned long parsed;
 			char	   *endptr;
+			const char *val = defGetString(defel);
 
 			if (protocol_version_given)
 				ereport(ERROR,
@@ -320,8 +321,8 @@ parse_output_parameters(List *options, PGOutputData *data)
 			protocol_version_given = true;
 
 			errno = 0;
-			parsed = strtoul(strVal(defel->arg), &endptr, 10);
-			if (errno != 0 || *endptr != '\0')
+			parsed = strtoul(val, &endptr, 10);
+			if (endptr == val || errno != 0 || *endptr != '\0')
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("invalid proto_version")));
@@ -329,8 +330,7 @@ parse_output_parameters(List *options, PGOutputData *data)
 			if (parsed > PG_UINT32_MAX)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("proto_version \"%s\" out of range",
-								strVal(defel->arg))));
+						 errmsg("proto_version \"%s\" out of range", val)));
 
 			data->protocol_version = (uint32) parsed;
 		}
@@ -346,7 +346,7 @@ parse_output_parameters(List *options, PGOutputData *data)
 			 * Pass a copy of the DefElem->arg since SplitIdentifierString
 			 * modifies its input.
 			 */
-			if (!SplitIdentifierString(pstrdup(strVal(defel->arg)), ',',
+			if (!SplitIdentifierString(pstrdup(defGetString(defel)), ',',
 									   &data->publication_names))
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_NAME),
@@ -1936,6 +1936,9 @@ pgoutput_stream_prepare_txn(LogicalDecodingContext *ctx,
 	OutputPluginPrepareWrite(ctx, true);
 	logicalrep_write_stream_prepare(ctx->out, txn, prepare_lsn);
 	OutputPluginWrite(ctx, true);
+
+	/* Schema cache updates at PREPARE survive ROLLBACK PREPARED. */
+	cleanup_rel_sync_cache(txn->xid, true);
 }
 
 /*
@@ -2307,16 +2310,16 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 /*
  * Cleanup list of streamed transactions and update the schema_sent flag.
  *
- * When a streamed transaction commits or aborts, we need to remove the
- * toplevel XID from the schema cache. If the transaction aborted, the
- * subscriber will simply throw away the schema records we streamed, so
- * we don't need to do anything else.
+ * When a streamed transaction commits, aborts or prepares, we need to remove
+ * the toplevel XID from the schema cache. If the transaction aborted, the
+ * subscriber will simply throw away the schema records we streamed, so we
+ * don't need to do anything else.
  *
- * If the transaction is committed, the subscriber will update the relation
- * cache - so tweak the schema_sent flag accordingly.
+ * If the transaction is committed or prepared, the subscriber will update
+ * the relation cache - so tweak the schema_sent flag accordingly.
  */
 static void
-cleanup_rel_sync_cache(TransactionId xid, bool is_commit)
+cleanup_rel_sync_cache(TransactionId xid, bool mark_schema_sent)
 {
 	HASH_SEQ_STATUS hash_seq;
 	RelationSyncEntry *entry;
@@ -2328,16 +2331,16 @@ cleanup_rel_sync_cache(TransactionId xid, bool is_commit)
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		/*
-		 * We can set the schema_sent flag for an entry that has committed xid
-		 * in the list as that ensures that the subscriber would have the
-		 * corresponding schema and we don't need to send it unless there is
-		 * any invalidation for that relation.
+		 * We can set the schema_sent flag for an entry that has a committed or
+		 * prepared xid in the list as that ensures that the subscriber would
+		 * have the corresponding schema and we don't need to send it unless
+		 * there is any invalidation for that relation.
 		 */
 		foreach(lc, entry->streamed_txns)
 		{
 			if (xid == (uint32) lfirst_int(lc))
 			{
-				if (is_commit)
+				if (mark_schema_sent)
 					entry->schema_sent = true;
 
 				entry->streamed_txns =

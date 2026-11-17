@@ -35,6 +35,9 @@ test: fk-partitioned-1
 test: fk-partitioned-2
 test: fk-snapshot
 test: eval-plan-qual
+test: eval-plan-qual-dropped-column
+test: eval-plan-qual-resjunk
+test: eval-plan-qual-rowtype-alter
 test: eval-plan-qual-trigger
 test: inplace-inval
 test: intra-grant-inplace
@@ -50,6 +53,7 @@ test: insert-conflict-do-update-2
 test: insert-conflict-do-update-3
 test: insert-conflict-do-update-4
 test: insert-conflict-specconflict
+test: insert-conflict-serializable
 test: merge-insert-update
 test: merge-delete
 test: merge-update
@@ -89,6 +93,7 @@ test: alter-table-3
 test: alter-table-4
 test: create-trigger
 test: sequence-ddl
+test: rowtypes-alter
 test: async-notify
 test: vacuum-no-cleanup-lock
 test: timeouts
@@ -114,3 +119,5 @@ test: serializable-parallel
 test: serializable-parallel-2
 test: serializable-parallel-3
 test: ddl-dependency-locking
+test: type-ddl-locking
+test: tablespace-dependency-locking

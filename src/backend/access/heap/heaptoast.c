@@ -181,8 +181,9 @@ heap_toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 	 * large attributes with attstorage EXTENDED or EXTERNAL, and store them
 	 * external.
 	 */
-	while (heap_compute_data_size(tupleDesc,
-								  toast_values, toast_isnull) > maxDataLen)
+	while (heap_compute_data_size_ext(tupleDesc,
+									  toast_values, toast_isnull,
+									  true) > maxDataLen)
 	{
 		int			biggest_attno;
 
@@ -222,8 +223,9 @@ heap_toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 	 * are still inline, and make them external.  But skip this if there's no
 	 * toast table to push them to.
 	 */
-	while (heap_compute_data_size(tupleDesc,
-								  toast_values, toast_isnull) > maxDataLen &&
+	while (heap_compute_data_size_ext(tupleDesc,
+									  toast_values, toast_isnull,
+									  true) > maxDataLen &&
 		   rel->rd_rel->reltoastrelid != InvalidOid)
 	{
 		int			biggest_attno;
@@ -238,8 +240,9 @@ heap_toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 	 * Round 3 - this time we take attributes with storage MAIN into
 	 * compression
 	 */
-	while (heap_compute_data_size(tupleDesc,
-								  toast_values, toast_isnull) > maxDataLen)
+	while (heap_compute_data_size_ext(tupleDesc,
+									  toast_values, toast_isnull,
+									  true) > maxDataLen)
 	{
 		int			biggest_attno;
 
@@ -257,8 +260,9 @@ heap_toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 	 */
 	maxDataLen = TOAST_TUPLE_TARGET_MAIN - hoff;
 
-	while (heap_compute_data_size(tupleDesc,
-								  toast_values, toast_isnull) > maxDataLen &&
+	while (heap_compute_data_size_ext(tupleDesc,
+									  toast_values, toast_isnull,
+									  true) > maxDataLen &&
 		   rel->rd_rel->reltoastrelid != InvalidOid)
 	{
 		int			biggest_attno;
@@ -406,6 +410,17 @@ toast_flatten_tuple(HeapTuple tup, TupleDesc tupleDesc)
 		tup->t_data->t_infomask2 & HEAP2_XACT_MASK;
 
 	/*
+	 * If the input tuple is a datum tuple, need to set its length (which was
+	 * reset by the t_choice assignment above).
+	 *
+	 * If it was versioned and had fewer attributes than the descriptor, it
+	 * will now be full-width and as part of that might have a different
+	 * version.
+	 */
+	if (HeapTupleHeaderIsDatum(tup->t_data))
+		heap_tuple_set_datum(new_tuple->t_data, tupleDesc, new_tuple->t_len);
+
+	/*
 	 * Free allocated temp values
 	 */
 	for (i = 0; i < numAttrs; i++)
@@ -522,9 +537,7 @@ toast_flatten_tuple_to_datum(HeapTupleHeader tup,
 	new_data->t_hoff = new_header_len;
 
 	/* Set the composite-Datum header fields correctly */
-	HeapTupleHeaderSetDatumLength(new_data, new_tuple_len);
-	HeapTupleHeaderSetTypeId(new_data, tupleDesc->tdtypeid);
-	HeapTupleHeaderSetTypMod(new_data, tupleDesc->tdtypmod);
+	heap_tuple_set_datum(new_data, tupleDesc, new_tuple_len);
 
 	/* Copy over the data, and fill the null bitmap if needed */
 	heap_fill_tuple(tupleDesc,

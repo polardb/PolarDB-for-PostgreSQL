@@ -575,6 +575,7 @@ extern Relation ExecOpenScanRelation(EState *estate, Index scanrelid, int eflags
 extern void ExecInitRangeTable(EState *estate, List *rangeTable);
 extern void ExecCloseRangeTableRelations(EState *estate);
 extern void ExecCloseResultRelations(EState *estate);
+extern void ExecCloseTrigTargetRelations(EState *estate);
 
 static inline RangeTblEntry *
 exec_rt_fetch(Index rti, EState *estate)
@@ -655,6 +656,8 @@ extern void CheckCmdReplicaIdentity(Relation rel, CmdType cmd);
 
 extern void CheckSubscriptionRelkind(char relkind, const char *nspname,
 									 const char *relname);
+extern void CheckSubscriptionTargetRel(Oid relid, const char *nspname,
+									   const char *relname);
 
 /*
  * prototypes from functions in nodeModifyTable.c

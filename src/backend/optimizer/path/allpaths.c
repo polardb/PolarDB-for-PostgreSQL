@@ -1262,10 +1262,15 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 		 * If set_append_rel_size() decided the parent appendrel was
 		 * parallel-unsafe at some point after visiting this child rel, we
 		 * need to propagate the unsafety marking down to the child, so that
-		 * we don't generate useless partial paths for it.
+		 * we don't generate useless partial paths for it.  Also, zap any
+		 * partial paths that already exist from places such as
+		 * set_subquery_pathlist().
 		 */
 		if (!rel->consider_parallel)
+		{
+			childrel->partial_pathlist = NIL;
 			childrel->consider_parallel = false;
+		}
 
 		/*
 		 * Compute the child's access paths.
@@ -3348,7 +3353,8 @@ make_rel_from_joinlist(PlannerInfo *root, List *joinlist)
 		 * using a plugin, GEQO, or the regular join search code.
 		 *
 		 * We put the initial_rels list into a PlannerInfo field because
-		 * has_legal_joinclause() needs to look at it (ugly :-().
+		 * has_legal_joinclause() and join_is_legal() need to look at it (ugly
+		 * :-().
 		 */
 		root->initial_rels = initial_rels;
 
