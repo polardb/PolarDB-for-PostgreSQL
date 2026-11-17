@@ -16,6 +16,30 @@ test_decoding = shared_module('test_decoding',
 )
 contrib_targets += test_decoding
 
+test_decoding_isolation = [
+  'mxact',
+  'delayed_startup',
+  'ondisk_startup',
+  'catalog_change_snapshot',
+  'concurrent_ddl_dml',
+  'oldest_xmin',
+  'snapshot_transfer',
+  'subxact_without_top',
+  'concurrent_stream',
+  'twophase_snapshot',
+  'skip_snapshot_restore',
+  'invalidation_distribution',
+  'tuplecid_nested',
+  'tuplecid_restart',
+]
+
+# slot_creation_error terminates another backend, whose FATAL message can be
+# lost on Windows, making the test unstable there.
+# See https://postgr.es/m/088AB35D-0860-494A-A9CF-8B301543AA51@yandex-team.ru
+if host_system != 'windows'
+  test_decoding_isolation += 'slot_creation_error'
+endif
+
 tests += {
   'name': 'test_decoding',
   'sd': meson.current_source_dir(),
@@ -41,6 +65,7 @@ tests += {
       'stats',
       'twophase',
       'twophase_stream',
+      'rowtypes_alter',
     ],
     'regress_args': [
       '--temp-config', files('logical.conf'),
@@ -50,21 +75,7 @@ tests += {
     'runningcheck': false,
   },
   'isolation': {
-    'specs': [
-      'mxact',
-      'delayed_startup',
-      'ondisk_startup',
-      'catalog_change_snapshot',
-      'concurrent_ddl_dml',
-      'oldest_xmin',
-      'snapshot_transfer',
-      'subxact_without_top',
-      'concurrent_stream',
-      'twophase_snapshot',
-      'slot_creation_error',
-      'skip_snapshot_restore',
-      'invalidation_distribution',
-    ],
+    'specs': test_decoding_isolation,
     'regress_args': [
       '--temp-config', files('logical.conf'),
     ],

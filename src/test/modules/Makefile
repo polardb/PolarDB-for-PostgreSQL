@@ -55,9 +55,9 @@ SUBDIRS += test_polar_shm_limit
 # POLAR end
 
 ifeq ($(enable_injection_points),yes)
-SUBDIRS += injection_points gin
+SUBDIRS += injection_points gin hash
 else
-ALWAYS_SUBDIRS += injection_points gin
+ALWAYS_SUBDIRS += injection_points gin hash
 endif
 
 ifeq ($(with_ssl),openssl)

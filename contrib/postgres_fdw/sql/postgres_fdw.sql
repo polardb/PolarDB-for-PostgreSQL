@@ -495,6 +495,15 @@ SELECT * FROM (
     SELECT 2 AS type,c1 FROM ft2
 ) a ORDER BY type;
 
+-- Ensure the code works correctly when sort_pathkeys is empty due to
+-- a redundant pathkey.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT * FROM (
+    (SELECT c1, c2 FROM ft1 WHERE c1 = 0 ORDER BY c1 LIMIT 1)
+    UNION
+    (SELECT c1, c2 FROM ft1 WHERE c1 = 0 ORDER BY c1)
+) a;
+
 -- ===================================================================
 -- JOIN queries
 -- ===================================================================
@@ -3651,6 +3660,21 @@ SELECT COUNT(*) FROM ftable;
 DROP TRIGGER trig_row_before ON ftable;
 DROP FOREIGN TABLE ftable;
 DROP TABLE batch_table;
+
+-- The remote server can report more rows than we sent, for example when a
+-- rule on the remote table rewrites the INSERT.
+CREATE TABLE batch_table ( x int );
+CREATE TABLE batch_rule_table ( x int );
+CREATE RULE batch_rule AS ON INSERT TO batch_table
+	DO INSTEAD INSERT INTO batch_rule_table SELECT i FROM generate_series(1, 3) i;
+CREATE FOREIGN TABLE ftable ( x int ) SERVER loopback OPTIONS ( table_name 'batch_table', batch_size '10' );
+INSERT INTO ftable VALUES (1), (2);
+SELECT COUNT(*) FROM batch_rule_table;
+
+-- Clean up
+DROP FOREIGN TABLE ftable;
+DROP TABLE batch_table;
+DROP TABLE batch_rule_table;
 
 -- Use partitioning
 CREATE TABLE batch_table ( x int ) PARTITION BY HASH (x);

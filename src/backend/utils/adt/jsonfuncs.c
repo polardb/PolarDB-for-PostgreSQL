@@ -3232,6 +3232,17 @@ populate_domain(DomainIOData *io,
 									colname, mcxt, PointerGetDatum(NULL),
 									jsv, isnull, escontext, omit_quotes);
 		Assert(!*isnull || SOFT_ERROR_OCCURRED(escontext));
+
+		/*
+		 * If converting to the base type failed softly, the caller is going
+		 * to discard the result, so don't check the domain's constraints on
+		 * it; doing so might throw a hard error or overwrite the saved error.
+		 */
+		if (SOFT_ERROR_OCCURRED(escontext))
+		{
+			*isnull = true;
+			return (Datum) 0;
+		}
 	}
 
 	if (!domain_check_safe(res, *isnull, typid, &io->domain_info, mcxt,
@@ -3535,7 +3546,17 @@ populate_record(TupleDesc tupdesc,
 	 * nulls.
 	 */
 	if (defaultval && JsObjectIsEmpty(obj))
+	{
+		/*
+		 * XXX: There's currently no guarantee that the default tuple matches
+		 * the tupledesc without this check. But this should probably have
+		 * been enforced much earlier.
+		 */
+		if (HeapTupleHeaderIsVersionedDatum(defaultval))
+			heap_datum_check(defaultval, tupdesc);
+
 		return defaultval;
+	}
 
 	/* (re)allocate metadata cache */
 	if (record == NULL ||
@@ -3615,6 +3636,14 @@ populate_record(TupleDesc tupdesc,
 										  &nulls[i],
 										  escontext,
 										  false);
+
+		/*
+		 * Once a column has failed softly, the caller is going to discard the
+		 * whole tuple, so don't populate the remaining columns; doing so
+		 * might throw a hard error or overwrite the saved error.
+		 */
+		if (SOFT_ERROR_OCCURRED(escontext))
+			break;
 	}
 
 	res = heap_form_tuple(tupdesc, values, nulls);
@@ -4930,9 +4959,11 @@ jsonb_set_lax(PG_FUNCTION_ARGS)
 
 		newval = DirectFunctionCall1(jsonb_in, CStringGetDatum("null"));
 
-		fcinfo->args[2].value = newval;
-		fcinfo->args[2].isnull = false;
-		return jsonb_set(fcinfo);
+		return DirectFunctionCall4(jsonb_set,
+								   PG_GETARG_DATUM(0),
+								   PG_GETARG_DATUM(1),
+								   newval,
+								   PG_GETARG_DATUM(3));
 	}
 	else if (strcmp(handle_val, "delete_key") == 0)
 	{

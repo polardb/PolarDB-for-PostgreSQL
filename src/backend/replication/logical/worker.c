@@ -182,6 +182,7 @@
 #include "utils/acl.h"
 #include "utils/dynahash.h"
 #include "utils/guc.h"
+#include "utils/injection_point.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -385,15 +386,13 @@ static void apply_handle_insert_internal(ApplyExecutionData *edata,
 static void apply_handle_update_internal(ApplyExecutionData *edata,
 										 ResultRelInfo *relinfo,
 										 TupleTableSlot *remoteslot,
-										 LogicalRepTupleData *newtup,
-										 Oid localindexoid);
+										 LogicalRepTupleData *newtup);
 static void apply_handle_delete_internal(ApplyExecutionData *edata,
 										 ResultRelInfo *relinfo,
 										 TupleTableSlot *remoteslot,
-										 Oid localindexoid);
+										 LogicalRepRelMapEntry *relmapentry);
 static bool FindReplTupleInLocalRel(ApplyExecutionData *edata, Relation localrel,
-									LogicalRepRelation *remoterel,
-									Oid localidxoid,
+									LogicalRepRelMapEntry *relmapentry,
 									TupleTableSlot *remoteslot,
 									TupleTableSlot **localslot);
 static void apply_handle_tuple_routing(ApplyExecutionData *edata,
@@ -720,12 +719,16 @@ finish_edata(ApplyExecutionData *edata)
 		ExecCleanupTupleRouting(edata->mtstate, edata->proute);
 
 	/*
-	 * Cleanup.  It might seem that we should call ExecCloseResultRelations()
-	 * here, but we intentionally don't.  It would close the rel we added to
+	 * Close relations opened specifically for trigger targets.  It might seem
+	 * that we should call ExecCloseResultRelations() here, but we
+	 * intentionally don't as that would close the rel we added to
 	 * es_opened_result_relations above, which is wrong because we took no
-	 * corresponding refcount.  We rely on ExecCleanupTupleRouting() to close
-	 * any other relations opened during execution.
+	 * corresponding refcount.  ExecCleanupTupleRouting() closes relations
+	 * opened for tuple routing, while ExecCloseTrigTargetRelations() closes
+	 * any relations we opened for AFTER triggers.
 	 */
+	ExecCloseTrigTargetRelations(estate);
+
 	ExecResetTupleTable(estate->es_tupleTable, false);
 	FreeExecutorState(estate);
 	pfree(edata);
@@ -818,8 +821,10 @@ slot_store_data(TupleTableSlot *slot, LogicalRepRelMapEntry *rel,
 			if (remoteattnum >= tupleData->ncols)
 				ereport(ERROR,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("logical replication column %d not found in tuple: only %d column(s) received",
-								remoteattnum + 1, tupleData->ncols)));
+						 errmsg_plural("logical replication column %d not found in tuple: only %d column received",
+									   "logical replication column %d not found in tuple: only %d columns received",
+									   tupleData->ncols,
+									   remoteattnum + 1, tupleData->ncols)));
 
 			colvalue = &tupleData->colvalues[remoteattnum];
 
@@ -935,8 +940,10 @@ slot_modify_data(TupleTableSlot *slot, TupleTableSlot *srcslot,
 		if (remoteattnum >= tupleData->ncols)
 			ereport(ERROR,
 					(errcode(ERRCODE_PROTOCOL_VIOLATION),
-					 errmsg("logical replication column %d not found in tuple: only %d column(s) received",
-							remoteattnum + 1, tupleData->ncols)));
+					 errmsg_plural("logical replication column %d not found in tuple: only %d column received",
+								   "logical replication column %d not found in tuple: only %d columns received",
+								   tupleData->ncols,
+								   remoteattnum + 1, tupleData->ncols)));
 
 		if (tupleData->colstatus[remoteattnum] != LOGICALREP_COLUMN_UNCHANGED)
 		{
@@ -2505,11 +2512,8 @@ check_relation_updatable(LogicalRepRelMapEntry *rel)
 	if (rel->updatable)
 		return;
 
-	/*
-	 * We are in error mode so it's fine this is somewhat slow. It's better to
-	 * give user correct error.
-	 */
-	if (OidIsValid(GetRelationIdentityOrPK(rel->localrel)))
+	/* Use the entry, so this matches what updatable was decided from. */
+	if (rel->idxisreplident)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -2612,8 +2616,10 @@ apply_handle_update(StringInfo s)
 			if (remoteattnum >= newtup.ncols)
 				ereport(ERROR,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("logical replication column %d not found in tuple: only %d column(s) received",
-								remoteattnum + 1, newtup.ncols)));
+						 errmsg_plural("logical replication column %d not found in tuple: only %d column received",
+									   "logical replication column %d not found in tuple: only %d columns received",
+									   newtup.ncols,
+									   remoteattnum + 1, newtup.ncols)));
 
 			if (newtup.colstatus[remoteattnum] != LOGICALREP_COLUMN_UNCHANGED)
 				target_perminfo->updatedCols =
@@ -2634,7 +2640,7 @@ apply_handle_update(StringInfo s)
 								   remoteslot, &newtup, CMD_UPDATE);
 	else
 		apply_handle_update_internal(edata, edata->targetRelInfo,
-									 remoteslot, &newtup, rel->localindexoid);
+									 remoteslot, &newtup);
 
 	finish_edata(edata);
 
@@ -2658,8 +2664,7 @@ static void
 apply_handle_update_internal(ApplyExecutionData *edata,
 							 ResultRelInfo *relinfo,
 							 TupleTableSlot *remoteslot,
-							 LogicalRepTupleData *newtup,
-							 Oid localindexoid)
+							 LogicalRepTupleData *newtup)
 {
 	EState	   *estate = edata->estate;
 	LogicalRepRelMapEntry *relmapentry = edata->targetRel;
@@ -2670,11 +2675,12 @@ apply_handle_update_internal(ApplyExecutionData *edata,
 	MemoryContext oldctx;
 
 	EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1, NIL);
+
+	INJECTION_POINT("apply-update-before-open-indices");
+
 	ExecOpenIndices(relinfo, false);
 
-	found = FindReplTupleInLocalRel(edata, localrel,
-									&relmapentry->remoterel,
-									localindexoid,
+	found = FindReplTupleInLocalRel(edata, localrel, relmapentry,
 									remoteslot, &localslot);
 	ExecClearTuple(remoteslot);
 
@@ -2793,7 +2799,7 @@ apply_handle_delete(StringInfo s)
 
 		ExecOpenIndices(relinfo, false);
 		apply_handle_delete_internal(edata, relinfo,
-									 remoteslot, rel->localindexoid);
+									 remoteslot, rel);
 		ExecCloseIndices(relinfo);
 	}
 
@@ -2819,11 +2825,10 @@ static void
 apply_handle_delete_internal(ApplyExecutionData *edata,
 							 ResultRelInfo *relinfo,
 							 TupleTableSlot *remoteslot,
-							 Oid localindexoid)
+							 LogicalRepRelMapEntry *relmapentry)
 {
 	EState	   *estate = edata->estate;
 	Relation	localrel = relinfo->ri_RelationDesc;
-	LogicalRepRelation *remoterel = &edata->targetRel->remoterel;
 	EPQState	epqstate;
 	TupleTableSlot *localslot;
 	bool		found;
@@ -2835,7 +2840,7 @@ apply_handle_delete_internal(ApplyExecutionData *edata,
 		   !localrel->rd_rel->relhasindex ||
 		   RelationGetIndexList(localrel) == NIL);
 
-	found = FindReplTupleInLocalRel(edata, localrel, remoterel, localindexoid,
+	found = FindReplTupleInLocalRel(edata, localrel, relmapentry,
 									remoteslot, &localslot);
 
 	/* If found delete it. */
@@ -2870,16 +2875,20 @@ apply_handle_delete_internal(ApplyExecutionData *edata,
  * the corresponding local relation using either replica identity index,
  * primary key, index or if needed, sequential scan.
  *
+ * 'relmapentry' is the relation map entry for 'localrel'; it tells which
+ * index to use, if any, and whether that index is the relation's replica
+ * identity or primary key.
+ *
  * Local tuple, if found, is returned in '*localslot'.
  */
 static bool
 FindReplTupleInLocalRel(ApplyExecutionData *edata, Relation localrel,
-						LogicalRepRelation *remoterel,
-						Oid localidxoid,
+						LogicalRepRelMapEntry *relmapentry,
 						TupleTableSlot *remoteslot,
 						TupleTableSlot **localslot)
 {
 	EState	   *estate = edata->estate;
+	Oid			localidxoid = relmapentry->localindexoid;
 	bool		found;
 
 	/*
@@ -2891,23 +2900,41 @@ FindReplTupleInLocalRel(ApplyExecutionData *edata, Relation localrel,
 	*localslot = table_slot_create(localrel, &estate->es_tupleTable);
 
 	Assert(OidIsValid(localidxoid) ||
-		   (remoterel->replident == REPLICA_IDENTITY_FULL));
+		   (relmapentry->remoterel.replident == REPLICA_IDENTITY_FULL));
 
 	if (OidIsValid(localidxoid))
 	{
 #ifdef USE_ASSERT_CHECKING
 		Relation	idxrel = index_open(localidxoid, AccessShareLock);
 
-		/* Index must be PK, RI, or usable for REPLICA IDENTITY FULL tables */
-		Assert(GetRelationIdentityOrPK(idxrel) == localidxoid ||
-			   IsIndexUsableForReplicaIdentityFull(BuildIndexInfo(idxrel),
-												   edata->targetRel->attrmap));
+		if (relmapentry->idxisreplident)
+		{
+			/*
+			 * We cannot assert this is still the replica identity or primary
+			 * key. DROP INDEX CONCURRENTLY and REINDEX CONCURRENTLY clear
+			 * indisvalid and indisreplident without conflicting with our
+			 * RowExclusiveLock, so GetRelationIdentityOrPK() may no longer
+			 * return it. Unique and non-partial is what the scan actually
+			 * relies on, and no DDL can take those away.
+			 */
+			Assert(idxrel->rd_index->indisunique);
+			Assert(heap_attisnull(idxrel->rd_indextuple,
+								  Anum_pg_index_indpred, NULL));
+		}
+		else
+		{
+			/* Otherwise every match is compared, so we need a whole row. */
+			Assert(relmapentry->remoterel.replident == REPLICA_IDENTITY_FULL);
+			Assert(IsIndexUsableForReplicaIdentityFull(BuildIndexInfo(idxrel),
+													   relmapentry->attrmap));
+		}
 		index_close(idxrel, AccessShareLock);
 #endif
 
-		found = RelationFindReplTupleByIndex(localrel, localidxoid,
-											 LockTupleExclusive,
-											 remoteslot, *localslot);
+		found = RelationFindReplTupleByIndexExt(localrel, localidxoid,
+												relmapentry->idxisreplident,
+												LockTupleExclusive,
+												remoteslot, *localslot);
 	}
 	else
 		found = RelationFindReplTupleSeq(localrel, LockTupleExclusive,
@@ -2964,9 +2991,9 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 	 * unsupported relkinds; and the set of partitions can change, so checking
 	 * at CREATE/ALTER SUBSCRIPTION would be insufficient.
 	 */
-	CheckSubscriptionRelkind(partrel->rd_rel->relkind,
-							 get_namespace_name(RelationGetNamespace(partrel)),
-							 RelationGetRelationName(partrel));
+	CheckSubscriptionTargetRel(RelationGetRelid(partrel),
+							   get_namespace_name(RelationGetNamespace(partrel)),
+							   RelationGetRelationName(partrel));
 
 	/*
 	 * To perform any of the operations below, the tuple must match the
@@ -3007,8 +3034,7 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 
 		case CMD_DELETE:
 			apply_handle_delete_internal(edata, partrelinfo,
-										 remoteslot_part,
-										 part_entry->localindexoid);
+										 remoteslot_part, part_entry);
 			break;
 
 		case CMD_UPDATE:
@@ -3026,9 +3052,7 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 				bool		found;
 
 				/* Get the matching local tuple from the partition. */
-				found = FindReplTupleInLocalRel(edata, partrel,
-												&part_entry->remoterel,
-												part_entry->localindexoid,
+				found = FindReplTupleInLocalRel(edata, partrel, part_entry,
 												remoteslot_part, &localslot);
 				if (!found)
 				{
@@ -3117,14 +3141,13 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 					partrel_new = partrelinfo_new->ri_RelationDesc;
 
 					/* Check that new partition also has supported relkind. */
-					CheckSubscriptionRelkind(partrel_new->rd_rel->relkind,
-											 get_namespace_name(RelationGetNamespace(partrel_new)),
-											 RelationGetRelationName(partrel_new));
+					CheckSubscriptionTargetRel(RelationGetRelid(partrel_new),
+											   get_namespace_name(RelationGetNamespace(partrel_new)),
+											   RelationGetRelationName(partrel_new));
 
 					/* DELETE old tuple found in the old partition. */
 					apply_handle_delete_internal(edata, partrelinfo,
-												 localslot,
-												 part_entry->localindexoid);
+												 localslot, part_entry);
 
 					/* INSERT new tuple into the new partition. */
 

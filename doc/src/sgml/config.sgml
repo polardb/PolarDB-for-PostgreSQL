@@ -4551,6 +4551,8 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
          restriction. The default is <literal>'pgoutput, test_decoding'</literal>,
          which are the two logical output plugins included in the standard
          <productname>PostgreSQL</productname> distribution.
+         (<xref linkend="guc-output-plugin-libraries-builtins"/> documents the
+         behavior of the system if they are removed from this list.)
         </para>
         <para>
          The format is a comma-separated list of library names, where each name
@@ -4589,6 +4591,45 @@ HINT:  If it is safe for all REPLICATION users to use this library as an output 
 </programlisting>
          </para>
         </note>
+
+        <table id="guc-output-plugin-libraries-builtins">
+         <title>Plugins Allowed by Default</title>
+         <tgroup cols="2">
+          <colspec colname="col1" colwidth="1*"/>
+          <colspec colname="col2" colwidth="2*"/>
+          <thead>
+           <row>
+            <entry>Plugin</entry>
+            <entry>Description</entry>
+           </row>
+          </thead>
+
+          <tbody>
+           <row>
+            <entry><link linkend="protocol-logical-replication">pgoutput</link></entry>
+            <entry>
+             Core plugin for logical replication. Removing <literal>pgoutput</literal>
+             from <literal>output_plugin_libraries</literal> will cause future
+             subscription connections, and maintenance of the replication slots
+             for subscriptions, to fail with an error. (Beware that existing
+             replication tools may not degrade gracefully if the server is
+             configured in this way.)
+            </entry>
+           </row>
+           <row>
+            <entry><xref linkend="test-decoding"/></entry>
+            <entry>
+             Decodes the WAL stream into a human-readable text representation.
+             <xref linkend="app-pgrecvlogical"/> uses this plugin by default, so
+             removing it from <literal>output_plugin_libraries</literal> will
+             prevent the use of that utility unless a replacement plugin is
+             installed and explicitly selected with
+             <link linkend="app-pgrecvlogical-option-plugin"><literal>--plugin</literal></link>.
+            </entry>
+           </row>
+          </tbody>
+         </tgroup>
+        </table>
        </listitem>
       </varlistentry>
 
@@ -6653,13 +6694,18 @@ local0.*    /var/log/postgresql
 
        <note>
         <para>
-          The logging collector is designed to never lose messages.  This means
+          The logging collector is designed to avoid dropping messages.  This means
           that in case of extremely high load, server processes could be
           blocked while trying to send additional log messages when the
           collector has fallen behind.  In contrast, <application>syslog</application>
           prefers to drop messages if it cannot write them, which means it
           may fail to log some messages in such cases but it will not block
           the rest of the system.
+        </para>
+        <para>
+         The logging collector does not guarantee that log messages have
+         reached durable storage.  It can still lose messages due to a system
+         crash, power loss, or an error while writing the log file.
         </para>
        </note>
 
@@ -7571,7 +7617,8 @@ local0.*    /var/log/postgresql
       <listitem>
        <para>
          This is a <function>printf</function>-style string that is output at the
-         beginning of each log line.
+         beginning of each log entry that is sent to <literal>stderr</literal>,
+         <literal>syslog</literal>, or <literal>eventlog</literal>.
          <literal>%</literal> characters begin <quote>escape sequences</quote>
          that are replaced with status information as outlined below.
          Unrecognized escapes are ignored. Other
@@ -11980,6 +12027,32 @@ LOG:  CleanUpLock: deleting: lock(0xb7acd844) id(24688,24696,0,0,0,1)
         present in the table if the block header is still sane. If the header is
         corrupt an error will be reported even if this option is enabled. The
         default setting is <literal>off</literal>.
+        Only superusers and users with the appropriate <literal>SET</literal>
+        privilege can change this setting.
+       </para>
+      </listitem>
+     </varlistentry>
+
+    <varlistentry id="guc-composite-type-mismatch" xreflabel="composite_type_mismatch">
+      <term><varname>composite_type_mismatch</varname> (<type>enum</type>)
+      <indexterm>
+       <primary><varname>composite_type_mismatch</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Reading a composite value whose row type was altered in an
+        incompatible way after the value was created normally causes
+        <productname>PostgreSQL</productname> to report an error.
+        This parameter controls that behavior.  With the default,
+        <literal>error</literal>, an error is reported, aborting the current
+        transaction.  With <literal>warn</literal>, the system warns about
+        mismatches but allows execution to continue.  With
+        <literal>disabled</literal>, the check is not performed at all.
+       </para>
+       <para>
+        Settings other than <literal>error</literal> may <emphasis>cause
+        crashes, wrong results, or other serious problems</emphasis>.
         Only superusers and users with the appropriate <literal>SET</literal>
         privilege can change this setting.
        </para>

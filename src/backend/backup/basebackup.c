@@ -24,9 +24,11 @@
 #include "backup/basebackup_incremental.h"
 #include "backup/basebackup_sink.h"
 #include "backup/basebackup_target.h"
+#include "catalog/pg_control.h"
 #include "catalog/pg_tablespace_d.h"
 #include "commands/defrem.h"
 #include "common/compression.h"
+#include "common/controldata_utils.h"
 #include "common/file_perm.h"
 #include "common/file_utils.h"
 #include "lib/stringinfo.h"
@@ -43,6 +45,7 @@
 #include "storage/checksum.h"
 #include "storage/dsm_impl.h"
 #include "storage/ipc.h"
+#include "storage/lwlock.h"
 #include "storage/reinit.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -90,7 +93,7 @@ static int64 sendDir(bbsink *sink, const char *path, int basepathlen, bool sizeo
 					 backup_manifest_info *manifest, Oid spcoid,
 					 IncrementalBackupInfo *ib, bool is_shared_data);
 static bool sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
-					 struct stat *statbuf, bool missing_ok,
+					 const struct stat *statbuf, bool missing_ok,
 					 Oid dboid, Oid spcoid, RelFileNumber relfilenumber,
 					 unsigned segno,
 					 backup_manifest_info *manifest,
@@ -333,11 +336,16 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 				tablespaceinfo *tmp = (tablespaceinfo *) lfirst(lc);
 
 				if (tmp->path == NULL)
+<<<<<<< HEAD
 					tmp->size = sendDir(sink, tmp->polar_shared ? polar_datadir : ".",
 										1, true, state.tablespaces, true, NULL, InvalidOid, NULL, tmp->polar_shared);
+=======
+					tmp->size = sendDir(sink, ".", 1, true, state.tablespaces,
+										true, NULL, InvalidOid, ib);
+>>>>>>> REL_17_12
 				else
 					tmp->size = sendTablespace(sink, tmp->path, tmp->oid, true,
-											   NULL, NULL);
+											   NULL, ib);
 				state.bytes_total += tmp->size;
 			}
 			state.bytes_total_is_valid = true;
@@ -354,10 +362,15 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 
 			if (ti->path == NULL)
 			{
-				struct stat statbuf;
 				bool		sendtblspclinks = true;
 				char	   *backup_label;
+<<<<<<< HEAD
 				bool		send_pg_control = false;
+=======
+				ControlFileData *controlData;
+				bool		crc_ok;
+				char	   *controlFile;
+>>>>>>> REL_17_12
 
 				tarname = ti->polar_shared ? "data.tar" : "base.tar";
 				bbsink_begin_archive(sink, tarname);
@@ -390,6 +403,7 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 					sendDir(sink, ".", 1, false, state.tablespaces, sendtblspclinks,
 							&manifest, InvalidOid, ib, ti->polar_shared);
 
+<<<<<<< HEAD
 				/*
 				 * ... and pg_control after everything else. POLAR: in shared
 				 * storage mode, pg_control in shared
@@ -410,6 +424,26 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 							 false, InvalidOid, InvalidOid,
 							 InvalidRelFileNumber, 0, &manifest, 0, NULL, 0);
 				}
+=======
+				/* ... and pg_control after everything else. */
+				LWLockAcquire(ControlFileLock, LW_SHARED);
+				controlData = get_controlfile(DataDir, &crc_ok);
+				LWLockRelease(ControlFileLock);
+
+				if (!crc_ok)
+					ereport(ERROR,
+							(errmsg("calculated CRC checksum does not match value stored in file")));
+
+				/* Send the full file, zero-padded as it is on disk */
+				controlFile = palloc0(PG_CONTROL_FILE_SIZE);
+				memcpy(controlFile, controlData, sizeof(ControlFileData));
+				pfree(controlData);
+
+				sendFileWithContent(sink, XLOG_CONTROL_FILE,
+									controlFile, PG_CONTROL_FILE_SIZE,
+									&manifest);
+				pfree(controlFile);
+>>>>>>> REL_17_12
 			}
 			else
 			{
@@ -714,12 +748,11 @@ perform_base_backup(basebackup_options *opt, bbsink *sink,
 
 	if (total_checksum_failures)
 	{
-		if (total_checksum_failures > 1)
-			ereport(WARNING,
-					(errmsg_plural("%lld total checksum verification failure",
-								   "%lld total checksum verification failures",
-								   total_checksum_failures,
-								   total_checksum_failures)));
+		ereport(WARNING,
+				(errmsg_plural("%lld total checksum verification failure",
+							   "%lld total checksum verification failures",
+							   total_checksum_failures,
+							   total_checksum_failures)));
 
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_CORRUPTED),
@@ -1235,7 +1268,8 @@ sendTablespace(bbsink *sink, char *path, Oid spcoid, bool sizeonly,
 /*
  * Include all files from the given directory in the output tar stream. If
  * 'sizeonly' is true, we just calculate a total length and return it, without
- * actually sending anything.
+ * actually sending anything. A file that will be sent incrementally is
+ * counted at the size of the incremental file.
  *
  * Omit any directory in the tablespaces list, to avoid backing up
  * tablespaces twice when they were created inside PGDATA.
@@ -1649,12 +1683,15 @@ sendDir(bbsink *sink, const char *path, int basepathlen, bool sizeonly,
  * If the whole file is to be sent, then incremental_blocks should be NULL,
  * and num_incremental_blocks can have any value, as it will be ignored.
  *
+ * For non-relation files, the stat data of the opened file is used, not
+ * 'statbuf'.
+ *
  * Returns true if the file was successfully sent, false if 'missing_ok',
  * and the file did not exist.
  */
 static bool
 sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
-		 struct stat *statbuf, bool missing_ok, Oid dboid, Oid spcoid,
+		 const struct stat *statbuf, bool missing_ok, Oid dboid, Oid spcoid,
 		 RelFileNumber relfilenumber, unsigned segno,
 		 backup_manifest_info *manifest, unsigned num_incremental_blocks,
 		 BlockNumber *incremental_blocks, unsigned truncation_block_length)
@@ -1667,6 +1704,7 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 	bool		verify_checksum = false;
 	pg_checksum_context checksum_ctx;
 	int			ibindex = 0;
+	struct stat filestat;
 
 	if (pg_checksum_init(&checksum_ctx, manifest->checksum_type) < 0)
 		elog(ERROR, "could not initialize checksum of file \"%s\"",
@@ -1682,7 +1720,18 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 				 errmsg("could not open file \"%s\": %m", readfilename)));
 	}
 
-	_tarWriteHeader(sink, tarfilename, NULL, statbuf, false);
+	/*
+	 * Non-relation files may be replaced by a rename(), making irrelevant the
+	 * caller's stat data.  Reuse fstat() on the opened file.
+	 */
+	filestat = *statbuf;
+
+	if (!RelFileNumberIsValid(relfilenumber) && fstat(fd, &filestat) != 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not stat file \"%s\": %m", readfilename)));
+
+	_tarWriteHeader(sink, tarfilename, NULL, &filestat, false);
 
 	/*
 	 * Checksums are verified in multiples of BLCKSZ, so the buffer length
@@ -1769,13 +1818,13 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 		 */
 		if (incremental_blocks == NULL)
 		{
-			size_t		remaining = statbuf->st_size - bytes_done;
+			size_t		remaining = filestat.st_size - bytes_done;
 
 			/*
 			 * If we've read the required number of bytes, then it's time to
 			 * stop.
 			 */
-			if (bytes_done >= statbuf->st_size)
+			if (bytes_done >= filestat.st_size)
 				break;
 
 			/*
@@ -1868,9 +1917,9 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 	}
 
 	/* If the file was truncated while we were sending it, pad it with zeros */
-	while (bytes_done < statbuf->st_size)
+	while (bytes_done < filestat.st_size)
 	{
-		size_t		remaining = statbuf->st_size - bytes_done;
+		size_t		remaining = filestat.st_size - bytes_done;
 		size_t		nbytes = Min(sink->bbs_buffer_length, remaining);
 
 		MemSet(sink->bbs_buffer, 0, nbytes);
@@ -1891,7 +1940,7 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 
 	CloseTransientFile(fd);
 
-	if (checksum_failures > 1)
+	if (checksum_failures > 0)
 	{
 		ereport(WARNING,
 				(errmsg_plural("file \"%s\" has a total of %d checksum verification failure",
@@ -1904,8 +1953,8 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 
 	total_checksum_failures += checksum_failures;
 
-	AddFileToBackupManifest(manifest, spcoid, tarfilename, statbuf->st_size,
-							(pg_time_t) statbuf->st_mtime, &checksum_ctx);
+	AddFileToBackupManifest(manifest, spcoid, tarfilename, filestat.st_size,
+							(pg_time_t) filestat.st_mtime, &checksum_ctx);
 
 	return true;
 }

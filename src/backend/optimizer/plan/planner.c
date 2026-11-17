@@ -58,6 +58,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "partitioning/partdesc.h"
+#include "rewrite/rewriteManip.h"
 #include "utils/acl.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -86,9 +87,10 @@ create_upper_paths_hook_type create_upper_paths_hook = NULL;
 #define EXPRKIND_APPINFO			7
 #define EXPRKIND_PHV				8
 #define EXPRKIND_TABLESAMPLE		9
-#define EXPRKIND_ARBITER_ELEM		10
-#define EXPRKIND_TABLEFUNC			11
-#define EXPRKIND_TABLEFUNC_LATERAL	12
+#define EXPRKIND_TABLESAMPLE_LATERAL	10
+#define EXPRKIND_ARBITER_ELEM		11
+#define EXPRKIND_TABLEFUNC			12
+#define EXPRKIND_TABLEFUNC_LATERAL	13
 
 /*
  * Data specific to grouping sets
@@ -125,9 +127,19 @@ typedef struct
 								 * subquery belonging to a set operation */
 } standard_qp_extra;
 
+/* Context for preprocess_subquery_phvs_walker */
+typedef struct
+{
+	PlannerInfo *root;
+	int			sublevels_up;
+} preprocess_subquery_phvs_context;
+
 /* Local functions */
 static Node *preprocess_expression(PlannerInfo *root, Node *expr, int kind);
 static void preprocess_qual_conditions(PlannerInfo *root, Node *jtnode);
+static void preprocess_subquery_phvs(PlannerInfo *root, Node *node);
+static bool preprocess_subquery_phvs_walker(Node *node,
+											preprocess_subquery_phvs_context *context);
 static void grouping_planner(PlannerInfo *root, double tuple_fraction,
 							 SetOperationStmt *setops);
 static grouping_sets_data *preprocess_grouping_sets(PlannerInfo *root);
@@ -654,9 +666,8 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 	root->eq_classes = NIL;
 	root->ec_merging_done = false;
 	root->last_rinfo_serial = 0;
-	root->all_result_relids =
-		parse->resultRelation ? bms_make_singleton(parse->resultRelation) : NULL;
-	root->leaf_result_relids = NULL;	/* we'll find out leaf-ness later */
+	root->all_result_relids = NULL;
+	root->leaf_result_relids = NULL;
 	root->append_rel_list = NIL;
 	root->row_identity_vars = NIL;
 	root->rowMarks = NIL;
@@ -799,19 +810,6 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 		if (rte->securityQuals)
 			root->qual_security_level = Max(root->qual_security_level,
 											list_length(rte->securityQuals));
-	}
-
-	/*
-	 * If we have now verified that the query target relation is
-	 * non-inheriting, mark it as a leaf target.
-	 */
-	if (parse->resultRelation)
-	{
-		RangeTblEntry *rte = rt_fetch(parse->resultRelation, parse->rtable);
-
-		if (!rte->inh)
-			root->leaf_result_relids =
-				bms_make_singleton(parse->resultRelation);
 	}
 
 	/*
@@ -962,10 +960,15 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 		if (rte->rtekind == RTE_RELATION)
 		{
 			if (rte->tablesample)
+			{
+				/* Preprocess the tablesample expression(s) fully */
+				kind = rte->lateral ? EXPRKIND_TABLESAMPLE_LATERAL :
+					EXPRKIND_TABLESAMPLE;
 				rte->tablesample = (TableSampleClause *)
 					preprocess_expression(root,
 										  (Node *) rte->tablesample,
-										  EXPRKIND_TABLESAMPLE);
+										  kind);
+			}
 		}
 		else if (rte->rtekind == RTE_SUBQUERY)
 		{
@@ -980,6 +983,14 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 				rte->subquery = (Query *)
 					flatten_join_alias_vars(root, root->parse,
 											(Node *) rte->subquery);
+
+			/*
+			 * Likewise for copies of our PlaceHolderVars in the subquery.
+			 * This must be done after the alias expansion above, which can
+			 * insert such copies.
+			 */
+			if (rte->lateral && root->glob->lastPHId != 0)
+				preprocess_subquery_phvs(root, (Node *) rte->subquery);
 		}
 		else if (rte->rtekind == RTE_FUNCTION)
 		{
@@ -1224,6 +1235,15 @@ preprocess_expression(PlannerInfo *root, Node *expr, int kind)
 		convert_saop_to_hashed_saop(expr);
 	}
 
+	/*
+	 * Preprocess any copies of our PlaceHolderVars within SubLink subselects.
+	 * This must be done after join alias expansion, which can insert such
+	 * copies, and before the SubLinks are turned into SubPlans, which collect
+	 * those copies as SubPlan arguments.
+	 */
+	if (root->parse->hasSubLinks && root->glob->lastPHId != 0)
+		preprocess_subquery_phvs(root, expr);
+
 	/* Expand SubLinks to SubPlans */
 	if (root->parse->hasSubLinks)
 		expr = SS_process_sublinks(root, expr, (kind == EXPRKIND_QUAL));
@@ -1302,6 +1322,80 @@ Expr *
 preprocess_phv_expression(PlannerInfo *root, Expr *expr)
 {
 	return (Expr *) preprocess_expression(root, (Node *) expr, EXPRKIND_PHV);
+}
+
+/*
+ * preprocess_subquery_phvs
+ *		Preprocess copies of this level's PlaceHolderVars that were pushed
+ *		down into subqueries within the given tree.
+ *
+ * When a subquery (a LATERAL RTE or a SubLink's subselect) references a
+ * pulled-up output that must be wrapped in a PlaceHolderVar, the PHV
+ * expression is pushed down into the subquery.  The subquery's own planning
+ * leaves that copy alone, since it belongs to our level, so we need to
+ * preprocess it.  We modify the PHVs in place, temporarily adjusting each to
+ * our level.  Preprocessing a copy's expression takes care of everything
+ * within it, including any further copies nested inside SubLinks there, so
+ * we don't look inside a copy ourselves.
+ */
+static void
+preprocess_subquery_phvs(PlannerInfo *root, Node *node)
+{
+	preprocess_subquery_phvs_context context;
+
+	context.root = root;
+	context.sublevels_up = 0;
+	(void) preprocess_subquery_phvs_walker(node, &context);
+}
+
+static bool
+preprocess_subquery_phvs_walker(Node *node,
+								preprocess_subquery_phvs_context *context)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, Query))
+	{
+		bool		result;
+
+		context->sublevels_up++;
+		result = query_tree_walker((Query *) node,
+								   preprocess_subquery_phvs_walker,
+								   context, 0);
+		context->sublevels_up--;
+		return result;
+	}
+	if (IsA(node, PlaceHolderVar))
+	{
+		PlaceHolderVar *phv = (PlaceHolderVar *) node;
+
+		/* A PHV of an upper level can't contain anything of our level */
+		if (phv->phlevelsup > context->sublevels_up)
+			return false;
+
+		/*
+		 * Is this a copy of one of our PHVs that is pushed down into a
+		 * subquery?
+		 */
+		if (context->sublevels_up > 0 &&
+			phv->phlevelsup == context->sublevels_up)
+		{
+			int			levelsup = phv->phlevelsup;
+			Node	   *expr;
+
+			/* Adjust the expression to our level, preprocess, adjust back */
+			expr = copyObject((Node *) phv->phexpr);
+			IncrementVarSublevelsUp(expr, -levelsup, 0);
+			expr = preprocess_expression(context->root, expr, EXPRKIND_PHV);
+			IncrementVarSublevelsUp(expr, levelsup, 0);
+			phv->phexpr = (Expr *) expr;
+			return false;
+		}
+
+		/* Otherwise, it's ours or a lower level's; look inside it */
+	}
+	return expression_tree_walker(node, preprocess_subquery_phvs_walker,
+								  context);
 }
 
 /*--------------------

@@ -1279,6 +1279,32 @@ SELECT * FROM (
          Remote SQL: SELECT "C 1" FROM "S 1"."T 1"
 (8 rows)
 
+-- Ensure the code works correctly when sort_pathkeys is empty due to
+-- a redundant pathkey.
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT * FROM (
+    (SELECT c1, c2 FROM ft1 WHERE c1 = 0 ORDER BY c1 LIMIT 1)
+    UNION
+    (SELECT c1, c2 FROM ft1 WHERE c1 = 0 ORDER BY c1)
+) a;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Unique
+   Output: ft1.c1, ft1.c2
+   ->  Sort
+         Output: ft1.c1, ft1.c2
+         Sort Key: ft1.c1, ft1.c2
+         ->  Append
+               ->  Limit
+                     Output: ft1.c1, ft1.c2
+                     ->  Foreign Scan on public.ft1
+                           Output: ft1.c1, ft1.c2
+                           Remote SQL: SELECT "C 1", c2 FROM "S 1"."T 1" WHERE (("C 1" = 0))
+               ->  Foreign Scan on public.ft1 ft1_1
+                     Output: ft1_1.c1, ft1_1.c2
+                     Remote SQL: SELECT "C 1", c2 FROM "S 1"."T 1" WHERE (("C 1" = 0))
+(14 rows)
+
 -- ===================================================================
 -- JOIN queries
 -- ===================================================================
@@ -10947,6 +10973,24 @@ SELECT COUNT(*) FROM ftable;
 DROP TRIGGER trig_row_before ON ftable;
 DROP FOREIGN TABLE ftable;
 DROP TABLE batch_table;
+-- The remote server can report more rows than we sent, for example when a
+-- rule on the remote table rewrites the INSERT.
+CREATE TABLE batch_table ( x int );
+CREATE TABLE batch_rule_table ( x int );
+CREATE RULE batch_rule AS ON INSERT TO batch_table
+	DO INSTEAD INSERT INTO batch_rule_table SELECT i FROM generate_series(1, 3) i;
+CREATE FOREIGN TABLE ftable ( x int ) SERVER loopback OPTIONS ( table_name 'batch_table', batch_size '10' );
+INSERT INTO ftable VALUES (1), (2);
+SELECT COUNT(*) FROM batch_rule_table;
+ count 
+-------
+     6
+(1 row)
+
+-- Clean up
+DROP FOREIGN TABLE ftable;
+DROP TABLE batch_table;
+DROP TABLE batch_rule_table;
 -- Use partitioning
 CREATE TABLE batch_table ( x int ) PARTITION BY HASH (x);
 CREATE TABLE batch_table_p0 (LIKE batch_table);

@@ -822,6 +822,9 @@ LockErrorCleanup(void)
 			GrantAwaitedLock();
 	}
 
+	/* An error can bypass ProcSleep()'s reset, so clear waitStart here */
+	pg_atomic_write_u64(&MyProc->waitStart, 0);
+
 	lockAwaited = NULL;
 
 	LWLockRelease(partitionLock);
@@ -1681,6 +1684,12 @@ ProcSleep(LOCALLOCK *locallock, LockMethod lockMethodTable, bool dontWait)
 			pfree(lock_waiters_sbuf.data);
 		}
 	} while (myWaitStatus == PROC_WAIT_STATUS_WAITING);
+
+	/*
+	 * Clear waitStart after the wait, as we may have set it after
+	 * ProcWakeup() cleared it.
+	 */
+	pg_atomic_write_u64(&MyProc->waitStart, 0);
 
 	/*
 	 * Disable the timers, if they are still running.  As in LockErrorCleanup,

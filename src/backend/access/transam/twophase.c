@@ -90,6 +90,7 @@
 #include "access/xlogutils.h"
 #include "catalog/pg_type.h"
 #include "catalog/storage.h"
+#include "common/string.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -1744,6 +1745,7 @@ static void
 RecreateTwoPhaseFile(TransactionId xid, void *content, int len)
 {
 	char		path[MAXPGPATH];
+	char		tmppath[MAXPGPATH];
 	pg_crc32c	statefile_crc;
 	int			fd;
 
@@ -1754,12 +1756,15 @@ RecreateTwoPhaseFile(TransactionId xid, void *content, int len)
 
 	TwoPhaseFilePath(path, xid);
 
-	fd = OpenTransientFile(path,
+	/* Write to a temp file and rename it into place */
+	snprintf(tmppath, sizeof(tmppath), "%s.tmp", path);
+
+	fd = OpenTransientFile(tmppath,
 						   O_CREAT | O_TRUNC | O_WRONLY | PG_BINARY);
 	if (fd < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not recreate file \"%s\": %m", path)));
+				 errmsg("could not recreate file \"%s\": %m", tmppath)));
 
 	/* Write content and CRC */
 	errno = 0;
@@ -1771,7 +1776,7 @@ RecreateTwoPhaseFile(TransactionId xid, void *content, int len)
 			errno = ENOSPC;
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not write file \"%s\": %m", path)));
+				 errmsg("could not write file \"%s\": %m", tmppath)));
 	}
 	if (polar_write(fd, &statefile_crc, sizeof(pg_crc32c)) != sizeof(pg_crc32c))
 	{
@@ -1780,7 +1785,7 @@ RecreateTwoPhaseFile(TransactionId xid, void *content, int len)
 			errno = ENOSPC;
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not write file \"%s\": %m", path)));
+				 errmsg("could not write file \"%s\": %m", tmppath)));
 	}
 	pgstat_report_wait_end();
 
@@ -1792,13 +1797,23 @@ RecreateTwoPhaseFile(TransactionId xid, void *content, int len)
 	if (polar_fsync(fd) != 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not fsync file \"%s\": %m", path)));
+				 errmsg("could not fsync file \"%s\": %m", tmppath)));
 	pgstat_report_wait_end();
 
 	if (CloseTransientFile(fd) != 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("could not close file \"%s\": %m", path)));
+				 errmsg("could not close file \"%s\": %m", tmppath)));
+
+	/*
+	 * No durable_rename(), as CheckPointTwoPhase() fsyncs the parent
+	 * directory.
+	 */
+	if (rename(tmppath, path) != 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not rename file \"%s\" to \"%s\": %m",
+						tmppath, path)));
 }
 
 /*
@@ -1917,6 +1932,19 @@ restoreTwoPhaseData(void)
 	cldir = AllocateDir(twophase_path);
 	while ((clde = ReadDir(cldir, twophase_path)) != NULL)
 	{
+		/* Ignore temp files created by RecreateTwoPhaseFile(). */
+		if (pg_str_endswith(clde->d_name, ".tmp"))
+		{
+			char		path[MAXPGPATH];
+
+			snprintf(path, MAXPGPATH, TWOPHASE_DIR "/%s", clde->d_name);
+			if (unlink(path) < 0)
+				ereport(WARNING,
+						(errcode_for_file_access(),
+						 errmsg("could not remove file \"%s\": %m", path)));
+			continue;
+		}
+
 		if (strlen(clde->d_name) == 16 &&
 			strspn(clde->d_name, "0123456789ABCDEF") == 16)
 		{
@@ -2444,6 +2472,19 @@ RecordTransactionAbortPrepared(TransactionId xid,
 	START_CRIT_SECTION();
 
 	/*
+	 * We have to set DELAY_CHKPT_START here, too; otherwise a checkpoint
+	 * starting immediately after the WAL record is inserted could complete
+	 * without flushing our pg_xact update, while the 2PC state file is on
+	 * disk.  The abort record would not be replayed after a crash and the
+	 * transaction would be recovered as prepared.  (This is essentially the
+	 * same kind of race condition as the COMMIT-to-clog-write case that
+	 * RecordTransactionCommit uses DELAY_CHKPT_IN_COMMIT for; see notes
+	 * there.)
+	 */
+	Assert((MyProc->delayChkptFlags & DELAY_CHKPT_START) == 0);
+	MyProc->delayChkptFlags |= DELAY_CHKPT_START;
+
+	/*
 	 * Emit the XLOG commit record. Note that we mark 2PC aborts as
 	 * potentially having AccessExclusiveLocks since we don't know whether or
 	 * not they do.
@@ -2463,11 +2504,11 @@ RecordTransactionAbortPrepared(TransactionId xid,
 	/* Always flush, since we're about to remove the 2PC state file */
 	XLogFlush(recptr);
 
-	/*
-	 * Mark the transaction aborted in clog.  This is not absolutely necessary
-	 * but we may as well do it while we are here.
-	 */
+	/* Mark the transaction aborted in clog */
 	TransactionIdAbortTree(xid, nchildren, children);
+
+	/* Checkpoint can proceed now */
+	MyProc->delayChkptFlags &= ~DELAY_CHKPT_START;
 
 	END_CRIT_SECTION();
 

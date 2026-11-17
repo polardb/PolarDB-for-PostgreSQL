@@ -60,6 +60,11 @@ SET ROLE regress_priv_user3;
 GRANT regress_priv_user1 TO regress_priv_user4;
 SELECT grantor::regrole FROM pg_auth_members WHERE roleid = 'regress_priv_user1'::regrole and member = 'regress_priv_user4'::regrole;
 RESET ROLE;
+REVOKE INHERIT OPTION FOR regress_priv_user2 FROM regress_priv_user3;
+SET ROLE regress_priv_user3;
+GRANT regress_priv_user1 TO regress_priv_user5; -- fail
+ALTER GROUP regress_priv_user1 ADD USER regress_priv_user5; -- fail
+RESET ROLE;
 REVOKE regress_priv_user2 FROM regress_priv_user3;
 REVOKE regress_priv_user1 FROM regress_priv_user2 CASCADE;
 
@@ -904,6 +909,21 @@ SET SESSION AUTHORIZATION regress_priv_user4;
 SELECT '{1}'::int4[]::int8[]; --other user, fail
 ROLLBACK;
 
+-- verify privilege checks on cast functions used by to_json()/to_jsonb()
+CREATE TYPE priv_testenum1 AS ENUM ('a');
+CREATE FUNCTION priv_testenum1_to_json(priv_testenum1) RETURNS json
+  LANGUAGE sql IMMUTABLE AS $$ SELECT to_json($1::text) $$;
+CREATE CAST (priv_testenum1 AS json) WITH FUNCTION priv_testenum1_to_json(priv_testenum1);
+REVOKE ALL ON FUNCTION priv_testenum1_to_json(priv_testenum1) FROM PUBLIC;
+SELECT to_json('a'::priv_testenum1); -- superuser, succeed
+SET SESSION AUTHORIZATION regress_priv_user4;
+SELECT to_json('a'::priv_testenum1); -- other user, fail
+SELECT to_jsonb('a'::priv_testenum1); -- other user, fail
+RESET SESSION AUTHORIZATION;
+DROP CAST (priv_testenum1 AS json);
+DROP FUNCTION priv_testenum1_to_json(priv_testenum1);
+DROP TYPE priv_testenum1;
+
 -- privileges on types
 
 -- switch to superuser
@@ -914,6 +934,9 @@ REVOKE USAGE ON TYPE priv_testtype1 FROM PUBLIC;
 GRANT USAGE ON TYPE priv_testtype1 TO regress_priv_user2;
 GRANT USAGE ON TYPE _priv_testtype1 TO regress_priv_user2; -- fail
 GRANT USAGE ON DOMAIN priv_testtype1 TO regress_priv_user2; -- fail
+
+CREATE FUNCTION cons_priv_testtype1(a int, b text) RETURNS priv_testtype1 LANGUAGE SQL
+  AS $$ SELECT row(a, b) $$ IMMUTABLE;
 
 CREATE DOMAIN priv_testdomain1 AS int;
 REVOKE USAGE on DOMAIN priv_testdomain1 FROM PUBLIC;
@@ -972,6 +995,10 @@ REVOKE ALL ON TYPE priv_testtype1 FROM PUBLIC;
 CREATE TABLE test12 (c int DEFAULT 0 CHECK (c > 0 AND '(0,1)'::priv_testtype1 IS NOT NULL));
 CREATE TABLE test13 (c int DEFAULT ('(0,1)'::priv_testtype1).a);
 
+CREATE TABLE test_tbl_with_idx (c int, d text);
+CREATE INDEX ON test_tbl_with_idx ((cons_priv_testtype1(c, d)));
+DROP TABLE test_tbl_with_idx;
+
 SET SESSION AUTHORIZATION regress_priv_user2;
 
 -- commands that should succeed
@@ -1022,6 +1049,10 @@ REVOKE ALL ON TYPE priv_testtype1 FROM PUBLIC;
 CREATE TABLE test12 (c int DEFAULT 0 CHECK (c > 0 AND '(0,1)'::priv_testtype1 IS NOT NULL));
 CREATE TABLE test13 (c int DEFAULT ('(0,1)'::priv_testtype1).a);
 
+CREATE TABLE test_tbl_with_idx (c int, d text);
+CREATE INDEX ON test_tbl_with_idx ((cons_priv_testtype1(c, d)));
+DROP TABLE test_tbl_with_idx;
+
 -- new stored expressions require USAGE on types, rebuilds do not
 \c -
 REVOKE USAGE ON TYPE priv_testtype1 FROM regress_priv_user2;
@@ -1057,6 +1088,7 @@ DROP TABLE test17b;
 DROP TABLE test12;
 DROP TABLE test13;
 
+DROP FUNCTION cons_priv_testtype1; -- ok
 DROP TYPE priv_testtype1; -- ok
 DROP DOMAIN priv_testdomain1; -- ok
 
@@ -1291,6 +1323,24 @@ REFRESH MATERIALIZED VIEW sro_mv;
 \c -
 REFRESH MATERIALIZED VIEW sro_mv;
 BEGIN; SET CONSTRAINTS ALL IMMEDIATE; REFRESH MATERIALIZED VIEW sro_mv; COMMIT;
+
+SET SESSION AUTHORIZATION regress_sro_user;
+-- REFRESH may not leave a type behind in the caller's pg_temp, either
+CREATE OR REPLACE FUNCTION mv_action() RETURNS bool LANGUAGE sql AS
+	'CREATE DOMAIN pg_temp.sro_domain AS pg_catalog.int4; SELECT true';
+REFRESH MATERIALIZED VIEW sro_mv; -- fail
+CREATE OR REPLACE FUNCTION mv_action() RETURNS bool LANGUAGE sql AS
+	'CREATE TYPE pg_temp.sro_enum AS ENUM (''x''); SELECT true';
+REFRESH MATERIALIZED VIEW sro_mv; -- fail
+CREATE OR REPLACE FUNCTION mv_action() RETURNS bool LANGUAGE sql AS
+	'CREATE TYPE pg_temp.sro_range AS RANGE (SUBTYPE = pg_catalog.int4); SELECT true';
+REFRESH MATERIALIZED VIEW sro_mv; -- fail
+-- including a multirange named apart from its range
+CREATE OR REPLACE FUNCTION mv_action() RETURNS bool LANGUAGE sql AS
+	'CREATE TYPE public.sro_range AS RANGE (SUBTYPE = pg_catalog.int4,
+	  MULTIRANGE_TYPE_NAME = pg_temp.sro_multirange); SELECT true';
+\c -
+REFRESH MATERIALIZED VIEW sro_mv; -- fail
 
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY use of eval_const_expressions()
 SET SESSION AUTHORIZATION regress_sro_user;

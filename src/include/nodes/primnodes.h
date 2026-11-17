@@ -215,6 +215,9 @@ typedef struct Expr
  * row identity information during UPDATE/DELETE/MERGE.  This value should
  * never be seen outside the planner.
  *
+ * INVALID_VAR should never appear as anything's varno.  We use it in a
+ * few APIs to denote removal of an RTE.
+ *
  * varnullingrels is the set of RT indexes of outer joins that can force
  * the Var's value to null (at the point where it appears in the query).
  * See optimizer/README for discussion of that.
@@ -237,6 +240,7 @@ typedef struct Expr
 #define    OUTER_VAR		(-2)	/* reference to outer subplan */
 #define    INDEX_VAR		(-3)	/* reference to index column */
 #define    ROWID_VAR		(-4)	/* row identity column during planning */
+#define    INVALID_VAR		(-5)	/* this is not a valid varno! */
 
 #define IS_SPECIAL_VARNO(varno)		((int) (varno) < 0)
 
@@ -1340,11 +1344,11 @@ typedef struct CaseWhen
  *	* Placeholder for intermediate results in some SQL/JSON expression nodes,
  *	  such as JsonConstructorExpr.
  *
- * The uses in CaseExpr and ArrayCoerceExpr are safe only to the extent that
- * there is not any other CaseExpr or ArrayCoerceExpr between the value source
- * node and its child CaseTestExpr(s).  This is true in the parse analysis
- * output, but the planner's function-inlining logic has to be careful not to
- * break it.
+ * The uses in CaseExpr, ArrayCoerceExpr, and JsonConstructorExpr are safe
+ * only to the extent that there is not any other such node between the
+ * value source node and its child CaseTestExpr(s).  This is true in the
+ * parse analysis output, but the planner's constant-folding of simple CASE
+ * and its function-inlining logic have to be careful not to break it.
  *
  * The nested-assignment-expression case is safe because the only node types
  * that can be above such CaseTestExprs are FieldStore and SubscriptingRef.
@@ -2270,8 +2274,9 @@ typedef struct RangeTblRef
  * During parse analysis, an RTE is created for the Join, and its index
  * is filled into rtindex.  This RTE is present mainly so that Vars can
  * be created that refer to the outputs of the join.  The planner sometimes
- * generates JoinExprs internally; these can have rtindex = 0 if there are
- * no join alias variables referencing such joins.
+ * generates JoinExprs internally.  Those for semijoins have rtindex = 0,
+ * since no join alias variables can reference them; but an antijoin is
+ * given an RTE anyway, because it needs a relid as other outer joins do.
  *----------
  */
 typedef struct JoinExpr

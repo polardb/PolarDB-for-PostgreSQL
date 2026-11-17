@@ -26,7 +26,6 @@
 #include "optimizer/paths.h"
 #include "optimizer/placeholder.h"
 #include "optimizer/planmain.h"
-#include "optimizer/planner.h"
 #include "optimizer/restrictinfo.h"
 #include "parser/analyze.h"
 #include "rewrite/rewriteManip.h"
@@ -125,7 +124,6 @@ static void distribute_qual_to_rels(PlannerInfo *root, Node *clause,
 									bool has_clone,
 									bool is_clone,
 									List **postponed_oj_qual_list);
-static bool check_redundant_nullability_qual(PlannerInfo *root, Node *clause);
 static Relids get_join_domain_min_rels(PlannerInfo *root, Relids domain_relids);
 static void check_mergejoinable(RestrictInfo *restrictinfo);
 static void check_hashjoinable(RestrictInfo *restrictinfo);
@@ -454,17 +452,13 @@ extract_lateral_references(PlannerInfo *root, RelOptInfo *brel, Index rtindex)
 			PlaceHolderVar *phv = (PlaceHolderVar *) node;
 			int			levelsup = phv->phlevelsup;
 
-			/* Have to work harder to adjust the contained expression too */
+			/*
+			 * Have to work harder to adjust the contained expression too.
+			 * (Its expression has already been preprocessed by
+			 * subquery_planner(), so we must not do that again here.)
+			 */
 			if (levelsup != 0)
 				IncrementVarSublevelsUp(node, -levelsup, 0);
-
-			/*
-			 * If we pulled the PHV out of a subquery RTE, its expression
-			 * needs to be preprocessed.  subquery_planner() already did this
-			 * for level-zero PHVs in function and values RTEs, though.
-			 */
-			if (levelsup > 0)
-				phv->phexpr = preprocess_phv_expression(root, phv->phexpr);
 		}
 		else
 			Assert(false);
@@ -962,19 +956,16 @@ deconstruct_recurse(PlannerInfo *root, Node *jtnode,
 									child_domain->jd_relids);
 				jtitem->qualscope = bms_union(left_item->qualscope,
 											  right_item->qualscope);
-				/* caution: ANTI join derived from SEMI will lack rtindex */
-				if (j->rtindex != 0)
-				{
-					parent_domain->jd_relids =
-						bms_add_member(parent_domain->jd_relids,
-									   j->rtindex);
-					jtitem->qualscope = bms_add_member(jtitem->qualscope,
+				Assert(j->rtindex != 0);
+				parent_domain->jd_relids =
+					bms_add_member(parent_domain->jd_relids,
+								   j->rtindex);
+				jtitem->qualscope = bms_add_member(jtitem->qualscope,
+												   j->rtindex);
+				root->outer_join_rels = bms_add_member(root->outer_join_rels,
 													   j->rtindex);
-					root->outer_join_rels = bms_add_member(root->outer_join_rels,
-														   j->rtindex);
-					mark_rels_nulled_by_join(root, j->rtindex,
-											 right_item->qualscope);
-				}
+				mark_rels_nulled_by_join(root, j->rtindex,
+										 right_item->qualscope);
 				jtitem->inner_join_rels = bms_union(left_item->inner_join_rels,
 													right_item->inner_join_rels);
 				jtitem->left_rels = left_item->qualscope;
@@ -1440,6 +1431,13 @@ make_outerjoininfo(PlannerInfo *root,
 	 */
 	strict_relids = find_nonnullable_rels((Node *) clause);
 
+	/*
+	 * find_nonnullable_rels looks inside PlaceHolderVars, so it can report
+	 * rels that the clause references only laterally.  Ignore those, since
+	 * like clause_relids we treat a PHV as computed at its ph_eval_at.
+	 */
+	strict_relids = bms_int_members(strict_relids, clause_relids);
+
 	/* Remember whether the clause is strict for any LHS relations */
 	sjinfo->lhs_strict = bms_overlap(strict_relids, left_rels);
 
@@ -1840,9 +1838,18 @@ compute_semijoin_info(PlannerInfo *root, SpecialJoinInfo *sjinfo, List *clause)
 		if (!(all_btree || all_hash))
 			return;
 
+		/*
+		 * Ensure the RHS expression exposes the join's input collation (its
+		 * type should be OK already); see comments for
+		 * canonicalize_ec_expression.
+		 */
+		right_expr = (Node *) canonicalize_ec_expression((Expr *) copyObject(right_expr),
+														 exprType(right_expr),
+														 op->inputcollid);
+
 		/* so far so good, keep building lists */
 		semi_operators = lappend_oid(semi_operators, opno);
-		semi_rhs_exprs = lappend(semi_rhs_exprs, copyObject(right_expr));
+		semi_rhs_exprs = lappend(semi_rhs_exprs, right_expr);
 	}
 
 	/* Punt if we didn't find at least one column to unique-ify */
@@ -2188,10 +2195,6 @@ distribute_quals_to_rels(PlannerInfo *root, List *clauses,
  * 'qualscope' identifies what level of JOIN the qual came from syntactically.
  * 'ojscope' is needed if we decide to force the qual up to the outer-join
  * level, which will be ojscope not necessarily qualscope.
- *
- * At the time this is called, root->join_info_list must contain entries for
- * at least those special joins that are syntactically below this qual.
- * (We now need that only for detection of redundant IS NULL quals.)
  */
 static void
 distribute_qual_to_rels(PlannerInfo *root, Node *clause,
@@ -2395,15 +2398,6 @@ distribute_qual_to_rels(PlannerInfo *root, Node *clause,
 		 */
 		is_pushed_down = true;
 
-		/*
-		 * It's possible that this is an IS NULL clause that's redundant with
-		 * a lower antijoin; if so we can just discard it.  We need not test
-		 * in any of the other cases, because this will only be possible for
-		 * pushed-down clauses.
-		 */
-		if (check_redundant_nullability_qual(root, clause))
-			return;
-
 		/* Feed qual to the equivalence machinery, if allowed by caller */
 		maybe_equivalence = allow_equivalence;
 
@@ -2568,53 +2562,6 @@ distribute_qual_to_rels(PlannerInfo *root, Node *clause,
 
 	/* No EC special case applies, so push it into the clause lists */
 	distribute_restrictinfo_to_rels(root, restrictinfo);
-}
-
-/*
- * check_redundant_nullability_qual
- *	  Check to see if the qual is an IS NULL qual that is redundant with
- *	  a lower JOIN_ANTI join.
- *
- * We want to suppress redundant IS NULL quals, not so much to save cycles
- * as to avoid generating bogus selectivity estimates for them.  So if
- * redundancy is detected here, distribute_qual_to_rels() just throws away
- * the qual.
- */
-static bool
-check_redundant_nullability_qual(PlannerInfo *root, Node *clause)
-{
-	Var		   *forced_null_var;
-	ListCell   *lc;
-
-	/* Check for IS NULL, and identify the Var forced to NULL */
-	forced_null_var = find_forced_null_var(clause);
-	if (forced_null_var == NULL)
-		return false;
-
-	/*
-	 * If the Var comes from the nullable side of a lower antijoin, the IS
-	 * NULL condition is necessarily true.  If it's not nulled by anything,
-	 * there is no point in searching the join_info_list.  Otherwise, we need
-	 * to find out whether the nulling rel is an antijoin.
-	 */
-	if (forced_null_var->varnullingrels == NULL)
-		return false;
-
-	foreach(lc, root->join_info_list)
-	{
-		SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) lfirst(lc);
-
-		/*
-		 * This test will not succeed if sjinfo->ojrelid is zero, which is
-		 * possible for an antijoin that was converted from a semijoin; but in
-		 * such a case the Var couldn't have come from its nullable side.
-		 */
-		if (sjinfo->jointype == JOIN_ANTI && sjinfo->ojrelid != 0 &&
-			bms_is_member(sjinfo->ojrelid, forced_null_var->varnullingrels))
-			return true;
-	}
-
-	return false;
 }
 
 /*

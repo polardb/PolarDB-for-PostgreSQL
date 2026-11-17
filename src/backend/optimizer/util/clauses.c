@@ -1265,6 +1265,11 @@ contain_context_dependent_node_walker(Node *node, int *flags)
  * passed Var nodes of the current query level, and which might therefore leak
  * data.  Such clauses must be applied after any lower-level security barrier
  * clauses.
+ *
+ * We might find a leaky function that is passed a CaseTestExpr or internal
+ * Param.  Those cases are dangerous since the CaseTestExpr or Param might
+ * represent the value of a Var.  We do not go to the trouble of figuring
+ * out whether it actually does; we just deem the clause leaky.
  */
 bool
 contain_leaked_vars(Node *clause)
@@ -1320,12 +1325,12 @@ contain_leaked_vars_walker(Node *node, void *context)
 		case T_ArrayCoerceExpr:
 
 			/*
-			 * If node contains a leaky function call, and there's any Var
-			 * underneath it, reject.
+			 * If node contains a leaky function call, and there's any Var or
+			 * Var-representative node underneath it, reject.
 			 */
 			if (check_functions_in_node(node, contain_leaked_vars_checker,
 										context) &&
-				contain_var_clause(node))
+				contain_var_or_representative(node))
 				return true;
 			break;
 
@@ -1343,7 +1348,7 @@ contain_leaked_vars_walker(Node *node, void *context)
 					  sbsroutines->fetch_leakproof))
 				{
 					/* Node is leaky, so reject if it contains Vars */
-					if (contain_var_clause(node))
+					if (contain_var_or_representative(node))
 						return true;
 				}
 			}
@@ -1368,8 +1373,8 @@ contain_leaked_vars_walker(Node *node, void *context)
 					Oid			funcid = get_opcode(lfirst_oid(opid));
 
 					if (!get_func_leakproof(funcid) &&
-						(contain_var_clause((Node *) lfirst(larg)) ||
-						 contain_var_clause((Node *) lfirst(rarg))))
+						(contain_var_or_representative((Node *) lfirst(larg)) ||
+						 contain_var_or_representative((Node *) lfirst(rarg))))
 						return true;
 				}
 			}
@@ -1400,7 +1405,7 @@ contain_leaked_vars_walker(Node *node, void *context)
 				}
 
 				if (!leakproof &&
-					contain_var_clause((Node *) minmaxexpr->args))
+					contain_var_or_representative((Node *) minmaxexpr->args))
 					return true;
 			}
 			break;
@@ -1974,11 +1979,12 @@ find_forced_null_vars(Node *node)
  *		*only* nullness of the particular Var, not any other conditions.
  *
  * This is just the single-clause case of find_forced_null_vars(), without
- * any allowance for AND conditions.  It's used by initsplan.c on individual
- * qual clauses.  The reason for not just applying find_forced_null_vars()
- * is that if an AND of an IS NULL clause with something else were to somehow
- * survive AND/OR flattening, initsplan.c might get fooled into discarding
- * the whole clause when only the IS NULL part of it had been proved redundant.
+ * any allowance for AND conditions.  It's used by prepjointree.c on
+ * individual qual clauses.  The reason for not just applying
+ * find_forced_null_vars() is that if an AND of an IS NULL clause with
+ * something else were to somehow survive AND/OR flattening, prepjointree.c
+ * might get fooled into discarding the whole clause when only the IS NULL
+ * part of it had been proved redundant.
  */
 Var *
 find_forced_null_var(Node *node)
@@ -2921,7 +2927,6 @@ eval_const_expressions_mutator(Node *node,
 				}
 				break;
 			}
-
 		case T_JsonValueExpr:
 			{
 				JsonValueExpr *jve = (JsonValueExpr *) node;
@@ -2945,15 +2950,48 @@ eval_const_expressions_mutator(Node *node,
 												  (Expr *) formatted_expr,
 												  copyObject(jve->format));
 			}
+		case T_JsonConstructorExpr:
+			{
+				JsonConstructorExpr *jce = (JsonConstructorExpr *) node;
+				JsonConstructorExpr *newjce;
+				Node	   *save_case_val;
 
+				/*
+				 * Copy the node and const-simplify its arguments.  We can't
+				 * use ece_generic_processing() here because we need to mess
+				 * with case_val only while processing the coercion.
+				 */
+				newjce = makeNode(JsonConstructorExpr);
+				memcpy(newjce, jce, sizeof(JsonConstructorExpr));
+				newjce->args = (List *)
+					eval_const_expressions_mutator((Node *) jce->args,
+												   context);
+				newjce->func = (Expr *)
+					eval_const_expressions_mutator((Node *) jce->func,
+												   context);
+
+				/*
+				 * Set up for the CaseTestExpr node contained in the coercion.
+				 * We must prevent it from absorbing any outer CASE value.
+				 */
+				save_case_val = context->case_val;
+				context->case_val = NULL;
+
+				newjce->coercion = (Expr *)
+					eval_const_expressions_mutator((Node *) jce->coercion,
+												   context);
+
+				context->case_val = save_case_val;
+
+				return (Node *) newjce;
+			}
 		case T_SubPlan:
 		case T_AlternativeSubPlan:
 
 			/*
 			 * Return a SubPlan unchanged --- too late to do anything with it.
-			 *
-			 * XXX should we ereport() here instead?  Probably this routine
-			 * should never be invoked after SubPlan creation.
+			 * This can happen in estimation mode, which runs after SubPlans
+			 * have been created.
 			 */
 			return node;
 		case T_RelabelType:
@@ -3657,20 +3695,28 @@ eval_const_expressions_mutator(Node *node,
 				return (Node *) newcdomain;
 			}
 		case T_PlaceHolderVar:
-
-			/*
-			 * In estimation mode, just strip the PlaceHolderVar node
-			 * altogether; this amounts to estimating that the contained value
-			 * won't be forced to null by an outer join.  In regular mode we
-			 * just use the default behavior (ie, simplify the expression but
-			 * leave the PlaceHolderVar node intact).
-			 */
-			if (context->estimate)
 			{
 				PlaceHolderVar *phv = (PlaceHolderVar *) node;
 
-				return eval_const_expressions_mutator((Node *) phv->phexpr,
-													  context);
+				/*
+				 * Leave a PHV of an upper query level alone: its expression
+				 * belongs to that level, which has already preprocessed it.
+				 * But we do copy the subtree, just to conform to this
+				 * function's API spec.
+				 */
+				if (phv->phlevelsup > 0)
+					return copyObject(node);
+
+				/*
+				 * In estimation mode, just strip the PlaceHolderVar node
+				 * altogether; this amounts to estimating that the contained
+				 * value won't be forced to null by an outer join.  In regular
+				 * mode we just use the default behavior (ie, simplify the
+				 * expression but leave the PlaceHolderVar node intact).
+				 */
+				if (context->estimate)
+					return eval_const_expressions_mutator((Node *) phv->phexpr,
+														  context);
 			}
 			break;
 		case T_ConvertRowtypeExpr:
@@ -5422,7 +5468,8 @@ substitute_actual_srf_parameters_mutator(Node *node,
 
 /*
  * pull_paramids
- *		Returns a Bitmapset containing the paramids of all Params in 'expr'.
+ *		Returns a Bitmapset containing the paramids of all PARAM_EXEC Params
+ *		in 'expr'.
  */
 Bitmapset *
 pull_paramids(Expr *expr)
@@ -5443,7 +5490,8 @@ pull_paramids_walker(Node *node, Bitmapset **context)
 	{
 		Param	   *param = (Param *) node;
 
-		*context = bms_add_member(*context, param->paramid);
+		if (param->paramkind == PARAM_EXEC)
+			*context = bms_add_member(*context, param->paramid);
 		return false;
 	}
 	return expression_tree_walker(node, pull_paramids_walker,
