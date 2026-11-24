@@ -2331,10 +2331,10 @@ cleanup_rel_sync_cache(TransactionId xid, bool mark_schema_sent)
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		/*
-		 * We can set the schema_sent flag for an entry that has a committed or
-		 * prepared xid in the list as that ensures that the subscriber would
-		 * have the corresponding schema and we don't need to send it unless
-		 * there is any invalidation for that relation.
+		 * We can set the schema_sent flag for an entry that has a committed
+		 * or prepared xid in the list as that ensures that the subscriber
+		 * would have the corresponding schema and we don't need to send it
+		 * unless there is any invalidation for that relation.
 		 */
 		foreach(lc, entry->streamed_txns)
 		{

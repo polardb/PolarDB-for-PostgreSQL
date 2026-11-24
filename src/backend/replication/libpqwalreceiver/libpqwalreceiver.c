@@ -144,14 +144,14 @@ libpqrcv_connect(const char *conninfo, bool logical, const char *appname,
 	bool		allow_unsafe_opts = false;
 
 	/*
-	 * CVE-2026-14661: Generally speaking, we want to protect any callers
-	 * of walrcv_connect() from connection options that could allow
-	 * elevation of privileges. But we also want to avoid restricting
-	 * primary_conninfo, which the DBA should have broad control over.
+	 * CVE-2026-14661: Generally speaking, we want to protect any callers of
+	 * walrcv_connect() from connection options that could allow elevation of
+	 * privileges. But we also want to avoid restricting primary_conninfo,
+	 * which the DBA should have broad control over.
 	 *
-	 * For back branches, we detect that case in two ways: either the
-	 * conninfo pointer we were given is literally the primary_conninfo
-	 * GUC variable, or the WAL receiver is starting physical replication.
+	 * For back branches, we detect that case in two ways: either the conninfo
+	 * pointer we were given is literally the primary_conninfo GUC variable,
+	 * or the WAL receiver is starting physical replication.
 	 */
 	if (conninfo == PrimaryConnInfo ||
 		(AmWalReceiverProcess() && !logical))

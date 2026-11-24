@@ -136,16 +136,18 @@ sub adjust_database_contents
 		# ability (amcheck will complain about them)
 		if ($dbnames{'regression'})
 		{
-			_add_st($result, 'regression',
-					'drop index if exists public.hslot_hubname',
-					'drop index if exists public.hslot_name',
-					'drop index if exists public.hub_name',
-					'drop index if exists public.iface_name',
-					'drop index if exists public.phone_name',
-					'drop index if exists public.pline_name',
-					'drop index if exists public.pslot_name',
-					'drop index if exists public.room_rno',
-					'drop index if exists public.wslot_name');
+			_add_st(
+				$result,
+				'regression',
+				'drop index if exists public.hslot_hubname',
+				'drop index if exists public.hslot_name',
+				'drop index if exists public.hub_name',
+				'drop index if exists public.iface_name',
+				'drop index if exists public.phone_name',
+				'drop index if exists public.pline_name',
+				'drop index if exists public.pslot_name',
+				'drop index if exists public.room_rno',
+				'drop index if exists public.wslot_name');
 		}
 	}
 

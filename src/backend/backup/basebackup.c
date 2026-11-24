@@ -327,7 +327,8 @@ perform_base_backup(basebackup_options *opt, bbsink *sink)
 
 				if (tmp->path == NULL)
 					tmp->size = sendDir(sink, tmp->polar_shared ? polar_datadir : ".",
-										1, true, state.tablespaces, true, NULL, NULL, tmp->polar_shared);
+										1, true, state.tablespaces,
+										true, NULL, NULL, tmp->polar_shared);
 				else
 					tmp->size = sendTablespace(sink, tmp->path, tmp->oid, true,
 											   NULL);
@@ -348,31 +349,20 @@ perform_base_backup(basebackup_options *opt, bbsink *sink)
 			if (ti->path == NULL)
 			{
 				bool		sendtblspclinks = true;
-<<<<<<< HEAD
 				bool		send_pg_control = false;
-=======
-				ControlFileData *controlData;
-				bool		crc_ok;
-				char	   *controlFile;
->>>>>>> REL_15_20
 
 				tarname = ti->polar_shared ? "data.tar" : "base.tar";
 				bbsink_begin_archive(sink, tarname);
 
 				/* In the main tar, include the backup_label first... */
-<<<<<<< HEAD
 
 				/*
 				 * POLAR: shared storage doesn't have backup_label, it's in
 				 * local dir
 				 */
 				if (!ti->polar_shared)
-					sendFileWithContent(sink, BACKUP_LABEL_FILE, labelfile->data,
-										&manifest);
-=======
-				sendFileWithContent(sink, BACKUP_LABEL_FILE,
-									labelfile->data, -1, &manifest);
->>>>>>> REL_15_20
+					sendFileWithContent(sink, BACKUP_LABEL_FILE,
+										labelfile->data, -1, &manifest);
 
 				/* Then the tablespace_map file, if required... */
 				if (opt->sendtblspcmapfile)
@@ -384,13 +374,13 @@ perform_base_backup(basebackup_options *opt, bbsink *sink)
 
 				/* Then the bulk of the files... */
 				if (ti->polar_shared)
-					sendDir(sink, polar_datadir, strlen(polar_datadir), false, state.tablespaces, sendtblspclinks,
-							&manifest, NULL, ti->polar_shared);
+					sendDir(sink, polar_datadir, strlen(polar_datadir),
+							false, state.tablespaces,
+							sendtblspclinks, &manifest, NULL, ti->polar_shared);
 				else
-					sendDir(sink, ".", 1, false, state.tablespaces, sendtblspclinks,
-							&manifest, NULL, ti->polar_shared);
+					sendDir(sink, ".", 1, false, state.tablespaces,
+							sendtblspclinks, &manifest, NULL, ti->polar_shared);
 
-<<<<<<< HEAD
 				/*
 				 * ... and pg_control after everything else. POLAR: in shared
 				 * storage mode, pg_control in shared
@@ -401,35 +391,30 @@ perform_base_backup(basebackup_options *opt, bbsink *sink)
 					(!polar_enable_shared_storage_mode && !ti->polar_shared);
 				if (send_pg_control)
 				{
+					ControlFileData *controlData;
+					bool		crc_ok;
+					char	   *controlFile;
+
 					polar_make_file_path_level2(polar_full_path, XLOG_CONTROL_FILE);
-					if (polar_stat(polar_full_path, &statbuf) != 0)
+					LWLockAcquire(ControlFileLock, LW_SHARED);
+					controlData = get_controlfile_by_exact_path(polar_full_path,
+																&crc_ok);
+					LWLockRelease(ControlFileLock);
+
+					if (!crc_ok)
 						ereport(ERROR,
-								(errcode_for_file_access(),
-								 errmsg("could not stat file \"%s\": %m",
-										XLOG_CONTROL_FILE)));
-					sendFile(sink, polar_full_path, XLOG_CONTROL_FILE, &statbuf,
-							 false, InvalidOid, &manifest, NULL);
+								(errmsg("calculated CRC checksum does not match value stored in file")));
+
+					/* Send the full file, zero-padded as it is on disk */
+					controlFile = palloc0(PG_CONTROL_FILE_SIZE);
+					memcpy(controlFile, controlData, sizeof(ControlFileData));
+					pfree(controlData);
+
+					sendFileWithContent(sink, XLOG_CONTROL_FILE,
+										controlFile, PG_CONTROL_FILE_SIZE,
+										&manifest);
+					pfree(controlFile);
 				}
-=======
-				/* ... and pg_control after everything else. */
-				LWLockAcquire(ControlFileLock, LW_SHARED);
-				controlData = get_controlfile(DataDir, &crc_ok);
-				LWLockRelease(ControlFileLock);
-
-				if (!crc_ok)
-					ereport(ERROR,
-							(errmsg("calculated CRC checksum does not match value stored in file")));
-
-				/* Send the full file, zero-padded as it is on disk */
-				controlFile = palloc0(PG_CONTROL_FILE_SIZE);
-				memcpy(controlFile, controlData, sizeof(ControlFileData));
-				pfree(controlData);
-
-				sendFileWithContent(sink, XLOG_CONTROL_FILE,
-									controlFile, PG_CONTROL_FILE_SIZE,
-									&manifest);
-				pfree(controlFile);
->>>>>>> REL_15_20
 			}
 			else
 			{
@@ -700,13 +685,8 @@ perform_base_backup(basebackup_options *opt, bbsink *sink)
 						(errcode_for_file_access(),
 						 errmsg("could not stat file \"%s\": %m", pathbuf)));
 
-<<<<<<< HEAD
 			sendFile(sink, polar_full_path, pathbuf, &statbuf, false, InvalidOid,
-					 &manifest, NULL);
-=======
-			sendFile(sink, pathbuf, pathbuf, &statbuf, false, InvalidOid,
 					 false, &manifest, NULL);
->>>>>>> REL_15_20
 
 			/* unconditionally mark file as archived */
 			StatusFilePath(pathbuf, fname, ".done");
@@ -1649,11 +1629,8 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 	char	   *segmentpath;
 	bool		verify_checksum = false;
 	pg_checksum_context checksum_ctx;
-<<<<<<< HEAD
 	bool		is_polar_share_data = false;
-=======
 	struct stat filestat;
->>>>>>> REL_15_20
 
 	if (pg_checksum_init(&checksum_ctx, manifest->checksum_type) < 0)
 		elog(ERROR, "could not initialize checksum of file \"%s\"",
@@ -1675,7 +1652,7 @@ sendFile(bbsink *sink, const char *readfilename, const char *tarfilename,
 	 */
 	filestat = *statbuf;
 
-	if (!isRelationFile && fstat(fd, &filestat) != 0)
+	if (!isRelationFile && polar_fstat(fd, &filestat) != 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not stat file \"%s\": %m", readfilename)));

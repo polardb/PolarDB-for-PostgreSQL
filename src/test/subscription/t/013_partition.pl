@@ -880,7 +880,7 @@ is($result, qq(4||1), 'updates of tab5 replicated correctly');
 # Validate we didn't neglect to cleanup any resources on either subscriber.
 foreach my $node ($node_subscriber1, $node_subscriber2)
 {
-	ok(!$node->log_contains(qr/relcache reference leak/),
+	ok( !$node->log_contains(qr/relcache reference leak/),
 		'check for resource leaks on ' . $node->name);
 }
 

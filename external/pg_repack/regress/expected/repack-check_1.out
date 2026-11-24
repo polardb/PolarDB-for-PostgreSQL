@@ -127,7 +127,10 @@ SELECT oid, relname
 (0 rows)
 
 -- check columns options
-SELECT attname, nullif(attstattarget, -1) as attstattarget, attoptions
+SELECT attname, nullif(attstattarget, -1) as attstattarget,
+       (SELECT array_agg(opt ORDER BY ord)
+        FROM unnest(attoptions) WITH ORDINALITY AS opts(opt, ord)
+        WHERE split_part(opt, '=', 1) <> 'pg_attver') AS attoptions
 FROM pg_attribute
 WHERE attrelid = 'tbl_idxopts'::regclass
 AND attnum > 0

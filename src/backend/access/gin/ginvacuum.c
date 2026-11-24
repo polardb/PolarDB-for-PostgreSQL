@@ -318,8 +318,8 @@ ginScanToDelete(GinVacuumState *gvs, BlockNumber blkno, bool isRoot,
 		 * link chain (the rightlinks stored on pages): the new right half of
 		 * an incompletely split page is in the sibling chain, but has no
 		 * downlink yet.  ginDeletePage isn't prepared to deal with that, so
-		 * we must refuse to delete when either the target or its left
-		 * sibling page is marked incompletely split.
+		 * we must refuse to delete when either the target or its left sibling
+		 * page is marked incompletely split.
 		 */
 		if (BufferIsValid(me->leftBuffer) && !GinPageRightMost(page) &&
 			!GinPageIsIncompleteSplit(page) &&

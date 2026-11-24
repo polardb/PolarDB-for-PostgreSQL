@@ -1800,7 +1800,7 @@ RecreateTwoPhaseFile(TransactionId xid, void *content, int len)
 	 * No durable_rename(), as CheckPointTwoPhase() fsyncs the parent
 	 * directory.
 	 */
-	if (rename(tmppath, path) != 0)
+	if (polar_rename(tmppath, path) != 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not rename file \"%s\" to \"%s\": %m",
@@ -1928,8 +1928,8 @@ restoreTwoPhaseData(void)
 		{
 			char		path[MAXPGPATH];
 
-			snprintf(path, MAXPGPATH, TWOPHASE_DIR "/%s", clde->d_name);
-			if (unlink(path) < 0)
+			snprintf(path, MAXPGPATH, "%s/%s", twophase_path, clde->d_name);
+			if (polar_unlink(path) < 0)
 				ereport(WARNING,
 						(errcode_for_file_access(),
 						 errmsg("could not remove file \"%s\": %m", path)));

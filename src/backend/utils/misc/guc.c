@@ -15369,7 +15369,6 @@ check_default_with_oids(bool *newval, void **extra, GucSource source)
 	return true;
 }
 
-<<<<<<< HEAD
 /*
  * POLAR: Check if an item exists in a list
  *
@@ -15499,7 +15498,8 @@ polar_assign_rename_wal_ready_file(const char *newval, void *extra)
 	snprintf(new_filename, MAXPGPATH, "%s%s%s%s", polar_datadir, archive_status_dir, newval, ".done");
 
 	durable_rename(old_filename, new_filename, ERROR);
-=======
+}
+
 static bool
 check_output_plugin_libraries(char **newval, void **extra, GucSource source)
 {
@@ -15530,7 +15530,6 @@ check_output_plugin_libraries(char **newval, void **extra, GucSource source)
 	free(copy);
 
 	return ok;
->>>>>>> REL_15_20
 }
 
 #include "guc-file.c"
