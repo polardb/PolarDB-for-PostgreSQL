@@ -1965,7 +1965,6 @@ get_required_extension(char *reqExtensionName,
 	ObjectAddress address;
 	Oid			reqExtensionOid;
 
-<<<<<<< HEAD
 	/*
 	 * POLAR: make auto cascade if the extension in the
 	 * polar_auto_cascade_extensions
@@ -1976,14 +1975,11 @@ get_required_extension(char *reqExtensionName,
 	}
 	/* POLAR end */
 
-	reqExtensionOid = get_extension_oid(reqExtensionName, true);
-=======
 	/* Block concurrent ALTER EXTENSION UPDATE */
 	address = get_object_address(OBJECT_EXTENSION,
 								 (Node *) makeString(reqExtensionName),
 								 &relation, ShareUpdateExclusiveLock, true);
 	reqExtensionOid = address.objectId;
->>>>>>> REL_17_12
 	if (!OidIsValid(reqExtensionOid))
 	{
 		if (cascade)

@@ -1287,20 +1287,15 @@ ExecInsert(ModifyTableContext *context,
 	}
 
 	/* AFTER ROW INSERT Triggers */
-<<<<<<< HEAD
 	if (table_modify_state == NULL)
 	{
 		ExecARInsertTriggers(estate, resultRelInfo, slot, recheckIndexes,
 							 ar_insert_trig_tcs);
-=======
-	ExecARInsertTriggers(estate, resultRelInfo, slot, recheckIndexes,
-						 ar_insert_trig_tcs);
-	if (mtstate->mt_transition_capture)
-		mtstate->mt_transition_capture->tcs_original_insert_tuple = NULL;
->>>>>>> REL_17_12
 
 		list_free(recheckIndexes);
 	}
+	if (mtstate->mt_transition_capture)
+		mtstate->mt_transition_capture->tcs_original_insert_tuple = NULL;
 
 	/*
 	 * Check any WITH CHECK OPTION constraints from parent views.  We are

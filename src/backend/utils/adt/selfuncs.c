@@ -5314,10 +5314,10 @@ examine_variable(PlannerInfo *root, Node *node, int varRelid,
 
 					/*
 					 * Reject an expression of a pseudo-type.  An anonymous
-					 * record's typmod is only valid in the session that
-					 * built the statistics.  Such statistics can still exist
-					 * in v18 and older, built by an older minor release
-					 * before CREATE STATISTICS rejected pseudo-types.
+					 * record's typmod is only valid in the session that built
+					 * the statistics.  Such statistics can still exist in v18
+					 * and older, built by an older minor release before
+					 * CREATE STATISTICS rejected pseudo-types.
 					 */
 					if (get_typtype(exprtype) == TYPTYPE_PSEUDO)
 						ereport(ERROR,

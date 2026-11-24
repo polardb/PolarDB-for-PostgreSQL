@@ -346,7 +346,7 @@ AllocSetComputeChunkLimit(Size maxBlockSize)
 	 * Also, allocChunkLimit must not exceed ALLOCSET_SEPARATE_THRESHOLD.
 	 */
 	StaticAssertStmt(ALLOC_CHUNK_LIMIT == ALLOCSET_SEPARATE_THRESHOLD,
-		"ALLOC_CHUNK_LIMIT != ALLOCSET_SEPARATE_THRESHOLD");
+					 "ALLOC_CHUNK_LIMIT != ALLOCSET_SEPARATE_THRESHOLD");
 
 	/*
 	 * Determine the maximum size that a chunk can be before we allocate an
@@ -358,8 +358,8 @@ AllocSetComputeChunkLimit(Size maxBlockSize)
 	 * ALLOC_CHUNK_FRACTION chunks fit on a maximally sized block.)
 	 */
 	allocChunkLimit = ALLOC_CHUNK_LIMIT;
-	while ((Size)(allocChunkLimit + ALLOC_CHUNKHDRSZ) >
-		(Size)((maxBlockSize - ALLOC_BLOCKHDRSZ) / ALLOC_CHUNK_FRACTION))
+	while ((Size) (allocChunkLimit + ALLOC_CHUNKHDRSZ) >
+		   (Size) ((maxBlockSize - ALLOC_BLOCKHDRSZ) / ALLOC_CHUNK_FRACTION))
 		allocChunkLimit >>= 1;
 
 	return allocChunkLimit;

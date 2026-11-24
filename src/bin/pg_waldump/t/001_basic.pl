@@ -248,8 +248,7 @@ command_fails_like(
 	my (@cmd, $stdout, $stderr, $result);
 
 	@cmd = (
-		'pg_waldump', '--start', $new_start,
-		'--limit', 1,
+		'pg_waldump', '--start', $new_start, '--limit', 1,
 		$node->data_dir . '/pg_wal/' . $start_walfile);
 	$result = IPC::Run::run \@cmd, '>', \$stdout, '2>', \$stderr;
 	ok($result, "runs with start segment and start LSN specified");

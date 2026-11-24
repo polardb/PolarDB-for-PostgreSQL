@@ -23,6 +23,7 @@ $primary->append_conf('postgresql.conf', <<EOF);
 summarize_wal = on
 wal_log_hints = off
 autovacuum = off
+polar_heap_bulk_extend_size = 0
 EOF
 $primary->start;
 

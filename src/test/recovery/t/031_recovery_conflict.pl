@@ -288,7 +288,8 @@ $psql_standby->reconnect_and_clear();
 # pg_stat_database. Needs to be tested before database is dropped, for obvious
 # reasons. A backend can process the same recovery conflict more than once
 # before it exits.
-cmp_ok( $node_standby->safe_psql(
+cmp_ok(
+	$node_standby->safe_psql(
 		$test_db,
 		qq[SELECT conflicts FROM pg_stat_database WHERE datname='$test_db';]),
 	'>=',
