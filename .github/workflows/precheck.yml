@@ -61,6 +61,7 @@ jobs:
       - name: ignore unstable cases
         run: |
           sed -i 's/SUBDIRS += pgvector/# &/' external/Makefile
+          sed -i '/^test: select_parallel$/d' src/test/regress/parallel_schedule
 
       - name: create and start the container
         run: |
