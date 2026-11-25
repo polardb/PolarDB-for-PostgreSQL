@@ -406,6 +406,18 @@ from
   join
   int4_tbl i4 on dummy = i4.f1;
 
+-- Likewise, but with the sublink inserted into a whole-row reference.
+
+select 1 from ((select (select 1) as x) ss1 cross join int4_tbl i4) j
+  where (select 1 where j is null) is null;
+
+select 1 from ((select (select 1) as x) ss1 cross join int4_tbl i4) j
+  where (1, 1) in (select (j is null)::int, count(*) from int4_tbl);
+
+select 1 from ((select (select 1) as x) ss1 cross join int4_tbl i4) j
+  where exists (select 1 from int4_tbl
+                tablesample system ((j is null)::int * 100));
+
 --
 -- Test case for subselect within UPDATE of INSERT...ON CONFLICT DO UPDATE
 --
@@ -591,6 +603,19 @@ select sum(ss.tst::int) from
          random() as r
   from onek i where i.unique1 = o.unique1 ) ss
 where o.ten = 0;
+
+--
+-- Test rescan of a hashed subplan that is referenced more than once (here
+-- the equivalence class produces two copies of it in the scan filter)
+--
+explain (costs off)
+select i4.f1, (select count(*) from onek
+               where two = four and two = (0 in (select i4.f1))::int)
+from int4_tbl i4 order by i4.f1;
+
+select i4.f1, (select count(*) from onek
+               where two = four and two = (0 in (select i4.f1))::int)
+from int4_tbl i4 order by i4.f1;
 
 --
 -- Test rescan of a SetOp node

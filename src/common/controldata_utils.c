@@ -61,9 +61,30 @@
 ControlFileData *
 get_controlfile(const char *DataDir, bool *crc_ok_p)
 {
+	char		ControlFilePath[MAXPGPATH];
+
+#ifndef FRONTEND
+	if (polar_enable_shared_storage_mode && !polar_is_replica())
+#else
+	if (polar_enable_shared_storage_mode && !polar_in_replica_mode_fe(DataDir))
+#endif
+		snprintf(ControlFilePath, MAXPGPATH, "%s/global/pg_control", polar_datadir);
+	else
+		snprintf(ControlFilePath, MAXPGPATH, "%s/global/pg_control", DataDir);
+
+	return get_controlfile_by_exact_path(ControlFilePath, crc_ok_p);
+}
+
+/*
+ * get_controlfile_by_exact_path()
+ *
+ * Read the control file at the given path and report its CRC status.
+ */
+ControlFileData *
+get_controlfile_by_exact_path(const char *ControlFilePath, bool *crc_ok_p)
+{
 	ControlFileData *ControlFile;
 	int			fd;
-	char		ControlFilePath[MAXPGPATH];
 	pg_crc32c	crc;
 	int			r;
 #ifdef FRONTEND
@@ -74,14 +95,6 @@ get_controlfile(const char *DataDir, bool *crc_ok_p)
 	AssertArg(crc_ok_p);
 
 	ControlFile = palloc(sizeof(ControlFileData));
-#ifndef FRONTEND
-	if (polar_enable_shared_storage_mode && !polar_is_replica())
-#else
-	if (polar_enable_shared_storage_mode && !polar_in_replica_mode_fe(DataDir))
-#endif
-		snprintf(ControlFilePath, MAXPGPATH, "%s/global/pg_control", polar_datadir);
-	else
-		snprintf(ControlFilePath, MAXPGPATH, "%s/global/pg_control", DataDir);
 
 #ifdef FRONTEND
 	INIT_CRC32C(last_crc);

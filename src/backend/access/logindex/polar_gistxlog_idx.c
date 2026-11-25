@@ -261,9 +261,6 @@ polar_gist_redo_page_update_record(XLogReaderState *record, BufferTag *tag, Buff
 				data += sizeof(OffsetNumber) * xldata->ntodelete;
 
 				PageIndexMultiDelete(page, todelete, xldata->ntodelete);
-
-				if (GistPageIsLeaf(page))
-					GistMarkTuplesDeleted(page);
 			}
 
 			/* Add new tuples if any */
@@ -349,7 +346,6 @@ polar_gist_redo_page_delete_record(XLogReaderState *record, BufferTag *tag, Buff
 			}
 
 			GistClearPageHasGarbage(page);
-			GistMarkTuplesDeleted(page);
 
 			PageSetLSN(page, lsn);
 		}

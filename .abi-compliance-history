@@ -18,6 +18,33 @@
 # Be sure to replace "<ADD JUSTIFICATION HERE>" with details of your change and
 # why it is deemed acceptable.
 
+c23382f0a81195537fceeae974ed0fd0b1bdfe88
+#
+# Introduce attribute versioning to prevent unsafe deforming
+# 2026-11-09 06:20:58 -0800
+#
+# This commit adds a new GUC, which is fine, and a new pg_proc entry,
+# which is less fine but the alternatives are worse.  Fortunately the
+# new function is only needed in pg_upgrade's target installation,
+# which should have it if it's freshly initdb'd.
+
+f5b8f05ee960ae5e534a56b8b7e4164a06db92ff
+#
+# Fix reuse of stale hash tables by duplicated hashed SubPlans
+# 2026-11-02 14:40:58 +0900
+#
+# SubPlanState gains a bool field in existing alignment padding, so
+# existing member offsets and sizeof(SubPlanState) remain unchanged.
+
+0a6dc4fe1832107755cce4ac6c296a065c8ec725
+#
+# Reorderbuffer: handle catalog-change-bearing aborted subxacts better
+# Wed Oct 14 19:42:04 2026 +0200
+#
+# ReorderBufferAddNewTupleCids()'s signature changes and struct
+# ReorderBufferChange gains a field, but no known third-party calls the
+# former or constructs the latter.
+
 6dbedd48b7c5024ef847572f073b94c3eed88042
 #
 # Check for USAGE privilege on types used by stored expressions.

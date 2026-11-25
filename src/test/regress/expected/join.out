@@ -3420,6 +3420,89 @@ select * from
  1 | 2 | 2
 (1 row)
 
+-- Nor an RTE_RESULT whose PHV is nested in a PHV evaluated at some but not
+-- all of the sibling rels
+explain (verbose, costs off)
+select ss.z
+from (select 1) s1 left join
+  ((select 1) s2 left join (select 1 as x) v on true
+   cross join (lateral (select coalesce(v.x, 0) as z, f1 from int4_tbl) ss
+               cross join lateral (select ss.f1 offset 0) g))
+  on true;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop Left Join
+   Output: (COALESCE((1), 0))
+   ->  Result
+   ->  Nested Loop
+         Output: (COALESCE((1), 0))
+         ->  Nested Loop
+               Output: int4_tbl.f1, (COALESCE((1), 0))
+               ->  Result
+                     Output: 1
+               ->  Seq Scan on public.int4_tbl
+                     Output: int4_tbl.f1, COALESCE((1), 0)
+         ->  Result
+               Output: NULL::integer
+(13 rows)
+
+select ss.z
+from (select 1) s1 left join
+  ((select 1) s2 left join (select 1 as x) v on true
+   cross join (lateral (select coalesce(v.x, 0) as z, f1 from int4_tbl) ss
+               cross join lateral (select ss.f1 offset 0) g))
+  on true;
+ z 
+---
+ 1
+ 1
+ 1
+ 1
+ 1
+(5 rows)
+
+-- Same, with the PHVs coming from grouping sets
+explain (costs off)
+select s1.x
+from (values (1)) as v(x),
+     lateral (select v.x + 1, 2) as s1(x, y)
+     cross join generate_series(s1.y, s1.y) as g
+group by grouping sets (1, 1);
+                   QUERY PLAN                   
+------------------------------------------------
+ HashAggregate
+   Hash Key: (((1) + 1))
+   Hash Key: (((1) + 1))
+   ->  Nested Loop
+         ->  Nested Loop
+               ->  Result
+               ->  Result
+         ->  Function Scan on generate_series g
+(8 rows)
+
+select s1.x
+from (values (1)) as v(x),
+     lateral (select v.x + 1, 2) as s1(x, y)
+     cross join generate_series(s1.y, s1.y) as g
+group by grouping sets (1, 1);
+ x 
+---
+ 2
+ 2
+(2 rows)
+
+-- But we can remove it if the outer PHV covers all of the sibling rels
+explain (costs off)
+select s.y from (values (1)) v(x), lateral (select v.x + f1 as y from int4_tbl) s
+group by grouping sets (1, ());
+          QUERY PLAN           
+-------------------------------
+ MixedAggregate
+   Hash Key: (1 + int4_tbl.f1)
+   Group Key: ()
+   ->  Seq Scan on int4_tbl
+(4 rows)
+
 -- Test proper handling of appendrel PHVs during useless-RTE removal
 explain (costs off)
 select * from
@@ -4471,6 +4554,114 @@ where ss1.c2 = 0;
 (0 rows)
 
 --
+-- check that a join is disallowed when its lateral reference can only be
+-- satisfied by way of a rel that laterally references the join itself
+--
+explain (costs off)
+select 1 from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 left join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Nested Loop
+   Join Filter: ((t3.q2) > t1.f1)
+   ->  Hash Left Join
+         Hash Cond: ((t2.f1) = t3.q1)
+         ->  Nested Loop
+               ->  Nested Loop Left Join
+                     ->  Seq Scan on int4_tbl t1
+                     ->  Materialize
+                           ->  Seq Scan on int4_tbl t2
+               ->  Result
+         ->  Hash
+               ->  Seq Scan on int8_tbl t3
+   ->  Memoize
+         Cache Key: t3.q2
+         Cache Mode: binary
+         ->  Result
+(16 rows)
+
+select 1 from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 left join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+ ?column? 
+----------
+(0 rows)
+
+-- likewise when the outer join above the lateral referencer is a full join
+explain (costs off)
+select count(*) from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 full join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         Join Filter: ((t3.q2) > t1.f1)
+         ->  Nested Loop
+               ->  Nested Loop Left Join
+                     ->  Seq Scan on int4_tbl t1
+                     ->  Materialize
+                           ->  Seq Scan on int4_tbl t2
+               ->  Hash Full Join
+                     Hash Cond: (t3.q1 = (t2.f1))
+                     ->  Seq Scan on int8_tbl t3
+                     ->  Hash
+                           ->  Result
+         ->  Memoize
+               Cache Key: t3.q2
+               Cache Mode: binary
+               ->  Result
+(17 rows)
+
+select count(*) from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 full join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+ count 
+-------
+    80
+(1 row)
+
+-- likewise when the lateral referencer is part of a sub-joinlist
+set from_collapse_limit to 4;
+explain (costs off)
+select count(*) from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         Join Filter: ((t3.q2) > t1.f1)
+         ->  Nested Loop
+               ->  Nested Loop Left Join
+                     ->  Seq Scan on int4_tbl t1
+                     ->  Materialize
+                           ->  Seq Scan on int4_tbl t2
+               ->  Hash Join
+                     Hash Cond: (t3.q1 = (t2.f1))
+                     ->  Seq Scan on int8_tbl t3
+                     ->  Hash
+                           ->  Result
+         ->  Result
+(14 rows)
+
+select count(*) from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+ count 
+-------
+     0
+(1 row)
+
+reset from_collapse_limit;
+--
 -- test successful handling of full join underneath left join (bug #14105)
 --
 explain (costs off)
@@ -4677,6 +4868,39 @@ select d.* from d left join (select distinct * from b) s
          Sort Key: d.a
          ->  Seq Scan on d
 (9 rows)
+
+-- join removal is not possible when the subquery has DISTINCT ON and a
+-- set-returning function that is not a DISTINCT ON column
+explain (costs off)
+select d.* from d left join
+  (select distinct on (id) id, generate_series(1, 2) as g from b order by id) s
+  on d.a = s.id
+  order by 1, 2;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Sort
+   Sort Key: d.a, d.b
+   ->  Hash Left Join
+         Hash Cond: (d.a = s.id)
+         ->  Seq Scan on d
+         ->  Hash
+               ->  Subquery Scan on s
+                     ->  ProjectSet
+                           ->  Unique
+                                 ->  Index Only Scan using b_pkey on b
+(10 rows)
+
+select d.* from d left join
+  (select distinct on (id) id, generate_series(1, 2) as g from b order by id) s
+  on d.a = s.id
+  order by 1, 2;
+ a | b 
+---+---
+ 1 | 3
+ 1 | 3
+ 2 | 2
+ 3 | 1
+(4 rows)
 
 -- check join removal works when uniqueness of the join condition is enforced
 -- by a UNION
@@ -5167,6 +5391,24 @@ select * from generate_series(100,200) g,
  123 |              123 | 4567890123456789
  123 | 4567890123456789 |              123
 (3 rows)
+
+-- lateral with UNION ALL subselect, where a member is a subquery whose
+-- output contains a lateral reference
+explain (costs off)
+  select ss.v from int8_tbl x,
+    lateral (select x.q1 from (select distinct q2 from int8_tbl) s union all
+             select q2 from int8_tbl) ss(v);
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on int8_tbl x
+   ->  Append
+         ->  Subquery Scan on s
+               ->  HashAggregate
+                     Group Key: int8_tbl_1.q2
+                     ->  Seq Scan on int8_tbl int8_tbl_1
+         ->  Seq Scan on int8_tbl
+(8 rows)
 
 -- lateral with VALUES
 explain (costs off)
@@ -6075,6 +6317,192 @@ lateral (select * from int8_tbl t1,
   0 | 4567890123456789 | -4567890123456789 | 4567890123456789 | 4567890123456789
 (3 rows)
 
+-- check that lateral references hidden in a whole-row join alias Var
+-- prevent pullup of a LATERAL subquery
+explain (verbose, costs off)
+select i4.f1, ss.x, i8.q1
+from int4_tbl i4,
+  lateral (select (j is null)::int
+           from ((select i4.f1) s left join (select 1) v on false) j) ss(x)
+  left join int8_tbl i8 on ss.x = i8.q1
+order by 1;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: i4.f1, ((((i4.f1 IS NULL) AND ((1) IS NULL)))::integer), i8.q1
+   Sort Key: i4.f1
+   ->  Hash Left Join
+         Output: i4.f1, ((((i4.f1 IS NULL) AND ((1) IS NULL)))::integer), i8.q1
+         Hash Cond: (((((i4.f1 IS NULL) AND ((1) IS NULL)))::integer) = i8.q1)
+         ->  Nested Loop
+               Output: i4.f1, ((((i4.f1 IS NULL) AND ((1) IS NULL)))::integer)
+               ->  Seq Scan on public.int4_tbl i4
+                     Output: i4.f1
+               ->  Nested Loop Left Join
+                     Output: (((i4.f1 IS NULL) AND ((1) IS NULL)))::integer
+                     Join Filter: false
+                     ->  Result
+                     ->  Result
+                           Output: 1
+                           One-Time Filter: false
+         ->  Hash
+               Output: i8.q1
+               ->  Seq Scan on public.int8_tbl i8
+                     Output: i8.q1
+(21 rows)
+
+select i4.f1, ss.x, i8.q1
+from int4_tbl i4,
+  lateral (select (j is null)::int
+           from ((select i4.f1) s left join (select 1) v on false) j) ss(x)
+  left join int8_tbl i8 on ss.x = i8.q1
+order by 1;
+     f1      | x | q1 
+-------------+---+----
+ -2147483647 | 0 |   
+     -123456 | 0 |   
+           0 | 0 |   
+      123456 | 0 |   
+  2147483647 | 0 |   
+(5 rows)
+
+-- same, with the lateral reference hidden in the subquery's quals
+explain (verbose, costs off)
+select i4.f1, i8.q1, ss.y
+from int4_tbl i4,
+  int8_tbl i8 left join
+  lateral (select 1 from ((select i4.f1) s left join (select 1) v on false) j
+           where length(j::text) > 3) ss(y) on true
+where i4.f1 = 0
+order by 1, 2;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Sort
+   Output: i4.f1, i8.q1, (1)
+   Sort Key: i8.q1
+   ->  Nested Loop
+         Output: i4.f1, i8.q1, (1)
+         ->  Seq Scan on public.int4_tbl i4
+               Output: i4.f1
+               Filter: (i4.f1 = 0)
+         ->  Nested Loop Left Join
+               Output: i8.q1, (1)
+               ->  Seq Scan on public.int8_tbl i8
+                     Output: i8.q1, i8.q2
+               ->  Materialize
+                     Output: (1)
+                     ->  Nested Loop Left Join
+                           Output: 1
+                           Join Filter: false
+                           Filter: (length((ROW(i4.f1, (1)))::text) > 3)
+                           ->  Result
+                           ->  Result
+                                 Output: 1
+                                 One-Time Filter: false
+(22 rows)
+
+select i4.f1, i8.q1, ss.y
+from int4_tbl i4,
+  int8_tbl i8 left join
+  lateral (select 1 from ((select i4.f1) s left join (select 1) v on false) j
+           where length(j::text) > 3) ss(y) on true
+where i4.f1 = 0
+order by 1, 2;
+ f1 |        q1        | y 
+----+------------------+---
+  0 |              123 | 1
+  0 |              123 | 1
+  0 | 4567890123456789 | 1
+  0 | 4567890123456789 | 1
+  0 | 4567890123456789 | 1
+(5 rows)
+
+-- check that lateral references in a sort key added below a mergejoin are
+-- replaced with nestloop params
+set enable_hashjoin to off;
+set enable_nestloop to off;
+explain (verbose, costs off)
+select * from int4_tbl t1
+  left join lateral
+    (select t1.f1 from int4_tbl t3 where t3.f1 = 0) s(x) on true
+  join int4_tbl t2 on -s.x = t2.f1
+where t1.f1 = 123456;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Nested Loop
+   Output: t1.f1, (t1.f1), t2.f1
+   ->  Seq Scan on public.int4_tbl t1
+         Output: t1.f1
+         Filter: (t1.f1 = 123456)
+   ->  Merge Join
+         Output: t2.f1, (t1.f1)
+         Merge Cond: (((- t1.f1)) = t2.f1)
+         ->  Sort
+               Output: (t1.f1), ((- t1.f1))
+               Sort Key: ((- t1.f1))
+               ->  Seq Scan on public.int4_tbl t3
+                     Output: t1.f1, (- t1.f1)
+                     Filter: (t3.f1 = 0)
+         ->  Sort
+               Output: t2.f1
+               Sort Key: t2.f1
+               ->  Seq Scan on public.int4_tbl t2
+                     Output: t2.f1
+(19 rows)
+
+select * from int4_tbl t1
+  left join lateral
+    (select t1.f1 from int4_tbl t3 where t3.f1 = 0) s(x) on true
+  join int4_tbl t2 on -s.x = t2.f1
+where t1.f1 = 123456;
+   f1   |   x    |   f1    
+--------+--------+---------
+ 123456 | 123456 | -123456
+(1 row)
+
+reset enable_nestloop;
+-- same, with the sort key computed atop a join
+explain (verbose, costs off)
+select count(*) from int4_tbl t1
+  left join lateral
+    (select t1.f1, t3.g from generate_series(1, 1000) t3(g), int4_tbl t4) s(x, y) on true
+  join tenk1 t2 on s.x + s.y = t2.unique1
+where t1.f1 = 0;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Nested Loop
+         ->  Seq Scan on public.int4_tbl t1
+               Output: t1.f1
+               Filter: (t1.f1 = 0)
+         ->  Merge Join
+               Merge Cond: (((t1.f1 + t3.g)) = t2.unique1)
+               ->  Sort
+                     Output: t3.g, (t1.f1), ((t1.f1 + t3.g))
+                     Sort Key: ((t1.f1 + t3.g))
+                     ->  Nested Loop
+                           Output: t3.g, t1.f1, (t1.f1 + t3.g)
+                           ->  Function Scan on pg_catalog.generate_series t3
+                                 Output: t3.g
+                                 Function Call: generate_series(1, 1000)
+                           ->  Materialize
+                                 ->  Seq Scan on public.int4_tbl t4
+               ->  Index Only Scan using tenk1_unique1 on public.tenk1 t2
+                     Output: t2.unique1
+(20 rows)
+
+select count(*) from int4_tbl t1
+  left join lateral
+    (select t1.f1, t3.g from generate_series(1, 1000) t3(g), int4_tbl t4) s(x, y) on true
+  join tenk1 t2 on s.x + s.y = t2.unique1
+where t1.f1 = 0;
+ count 
+-------
+  5000
+(1 row)
+
+reset enable_hashjoin;
 -- test some error cases where LATERAL should have been used but wasn't
 select f1,g from int4_tbl a, (select f1 as g) ss;
 ERROR:  column "f1" does not exist

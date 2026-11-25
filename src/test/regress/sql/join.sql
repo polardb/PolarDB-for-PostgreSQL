@@ -1091,6 +1091,40 @@ select * from
   (select 1 as x) ss1 left join (select 2 as y) ss2 on (true),
   lateral (select ss2.y as z limit 1) ss3;
 
+-- Nor an RTE_RESULT whose PHV is nested in a PHV evaluated at some but not
+-- all of the sibling rels
+explain (verbose, costs off)
+select ss.z
+from (select 1) s1 left join
+  ((select 1) s2 left join (select 1 as x) v on true
+   cross join (lateral (select coalesce(v.x, 0) as z, f1 from int4_tbl) ss
+               cross join lateral (select ss.f1 offset 0) g))
+  on true;
+select ss.z
+from (select 1) s1 left join
+  ((select 1) s2 left join (select 1 as x) v on true
+   cross join (lateral (select coalesce(v.x, 0) as z, f1 from int4_tbl) ss
+               cross join lateral (select ss.f1 offset 0) g))
+  on true;
+
+-- Same, with the PHVs coming from grouping sets
+explain (costs off)
+select s1.x
+from (values (1)) as v(x),
+     lateral (select v.x + 1, 2) as s1(x, y)
+     cross join generate_series(s1.y, s1.y) as g
+group by grouping sets (1, 1);
+select s1.x
+from (values (1)) as v(x),
+     lateral (select v.x + 1, 2) as s1(x, y)
+     cross join generate_series(s1.y, s1.y) as g
+group by grouping sets (1, 1);
+
+-- But we can remove it if the outer PHV covers all of the sibling rels
+explain (costs off)
+select s.y from (values (1)) v(x), lateral (select v.x + f1 as y from int4_tbl) s
+group by grouping sets (1, ());
+
 -- Test proper handling of appendrel PHVs during useless-RTE removal
 explain (costs off)
 select * from
@@ -1524,6 +1558,50 @@ select ss2.* from
 where ss1.c2 = 0;
 
 --
+-- check that a join is disallowed when its lateral reference can only be
+-- satisfied by way of a rel that laterally references the join itself
+--
+
+explain (costs off)
+select 1 from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 left join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+
+select 1 from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 left join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+
+-- likewise when the outer join above the lateral referencer is a full join
+explain (costs off)
+select count(*) from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 full join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+
+select count(*) from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 full join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+
+-- likewise when the lateral referencer is part of a sub-joinlist
+set from_collapse_limit to 4;
+
+explain (costs off)
+select count(*) from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+
+select count(*) from int4_tbl t1 left join int4_tbl t2 on true,
+  lateral (select t2.f1 offset 0) s1 join int8_tbl t3 on s1.f1 = t3.q1,
+  lateral (select t3.q2 offset 0) s2
+where s2.q2 > t1.f1;
+
+reset from_collapse_limit;
+
+--
 -- test successful handling of full join underneath left join (bug #14105)
 --
 
@@ -1621,6 +1699,18 @@ select d.* from d left join (select * from b group by b.id, b.c_id) s
 explain (costs off)
 select d.* from d left join (select distinct * from b) s
   on d.a = s.id;
+
+-- join removal is not possible when the subquery has DISTINCT ON and a
+-- set-returning function that is not a DISTINCT ON column
+explain (costs off)
+select d.* from d left join
+  (select distinct on (id) id, generate_series(1, 2) as g from b order by id) s
+  on d.a = s.id
+  order by 1, 2;
+select d.* from d left join
+  (select distinct on (id) id, generate_series(1, 2) as g from b order by id) s
+  on d.a = s.id
+  order by 1, 2;
 
 -- check join removal works when uniqueness of the join condition is enforced
 -- by a UNION
@@ -1853,6 +1943,13 @@ select * from generate_series(100,200) g,
   lateral (select * from int8_tbl a where g = q1 union all
            select * from int8_tbl b where g = q2) ss;
 
+-- lateral with UNION ALL subselect, where a member is a subquery whose
+-- output contains a lateral reference
+explain (costs off)
+  select ss.v from int8_tbl x,
+    lateral (select x.q1 from (select distinct q2 from int8_tbl) s union all
+             select q2 from int8_tbl) ss(v);
+
 -- lateral with VALUES
 explain (costs off)
   select count(*) from tenk1 a,
@@ -2084,6 +2181,73 @@ lateral (select * from int8_tbl t1,
                                      where q2 = (select greatest(t1.q1,t2.q2))
                                        and (select v.id=0)) offset 0) ss2) ss
          where t1.q1 = ss.q2) ss0;
+
+-- check that lateral references hidden in a whole-row join alias Var
+-- prevent pullup of a LATERAL subquery
+explain (verbose, costs off)
+select i4.f1, ss.x, i8.q1
+from int4_tbl i4,
+  lateral (select (j is null)::int
+           from ((select i4.f1) s left join (select 1) v on false) j) ss(x)
+  left join int8_tbl i8 on ss.x = i8.q1
+order by 1;
+select i4.f1, ss.x, i8.q1
+from int4_tbl i4,
+  lateral (select (j is null)::int
+           from ((select i4.f1) s left join (select 1) v on false) j) ss(x)
+  left join int8_tbl i8 on ss.x = i8.q1
+order by 1;
+
+-- same, with the lateral reference hidden in the subquery's quals
+explain (verbose, costs off)
+select i4.f1, i8.q1, ss.y
+from int4_tbl i4,
+  int8_tbl i8 left join
+  lateral (select 1 from ((select i4.f1) s left join (select 1) v on false) j
+           where length(j::text) > 3) ss(y) on true
+where i4.f1 = 0
+order by 1, 2;
+select i4.f1, i8.q1, ss.y
+from int4_tbl i4,
+  int8_tbl i8 left join
+  lateral (select 1 from ((select i4.f1) s left join (select 1) v on false) j
+           where length(j::text) > 3) ss(y) on true
+where i4.f1 = 0
+order by 1, 2;
+
+-- check that lateral references in a sort key added below a mergejoin are
+-- replaced with nestloop params
+set enable_hashjoin to off;
+set enable_nestloop to off;
+
+explain (verbose, costs off)
+select * from int4_tbl t1
+  left join lateral
+    (select t1.f1 from int4_tbl t3 where t3.f1 = 0) s(x) on true
+  join int4_tbl t2 on -s.x = t2.f1
+where t1.f1 = 123456;
+select * from int4_tbl t1
+  left join lateral
+    (select t1.f1 from int4_tbl t3 where t3.f1 = 0) s(x) on true
+  join int4_tbl t2 on -s.x = t2.f1
+where t1.f1 = 123456;
+
+reset enable_nestloop;
+
+-- same, with the sort key computed atop a join
+explain (verbose, costs off)
+select count(*) from int4_tbl t1
+  left join lateral
+    (select t1.f1, t3.g from generate_series(1, 1000) t3(g), int4_tbl t4) s(x, y) on true
+  join tenk1 t2 on s.x + s.y = t2.unique1
+where t1.f1 = 0;
+select count(*) from int4_tbl t1
+  left join lateral
+    (select t1.f1, t3.g from generate_series(1, 1000) t3(g), int4_tbl t4) s(x, y) on true
+  join tenk1 t2 on s.x + s.y = t2.unique1
+where t1.f1 = 0;
+
+reset enable_hashjoin;
 
 -- test some error cases where LATERAL should have been used but wasn't
 select f1,g from int4_tbl a, (select f1 as g) ss;

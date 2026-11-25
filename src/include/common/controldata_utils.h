@@ -13,6 +13,10 @@
 #include "catalog/pg_control.h"
 
 extern ControlFileData *get_controlfile(const char *DataDir, bool *crc_ok_p);
+
+/* POLAR */
+extern ControlFileData *get_controlfile_by_exact_path(const char *ControlFilePath,
+													  bool *crc_ok_p);
 extern void update_controlfile(const char *DataDir,
 							   ControlFileData *ControlFile, bool do_sync);
 
