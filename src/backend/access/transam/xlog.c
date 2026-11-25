@@ -723,7 +723,6 @@ static TimeLineID openLogTLI = 0;
  * Those values are kept consistent as long as crash recovery runs.
  */
 static XLogRecPtr LocalMinRecoveryPoint;
-static TimeLineID LocalMinRecoveryPointTLI;
 static bool updateMinRecoveryPoint = true;
 
 /* For WALInsertLockAcquire/Release functions */
@@ -3082,7 +3081,6 @@ UpdateMinRecoveryPoint(XLogRecPtr lsn, bool force)
 
 	/* update local copy */
 	LocalMinRecoveryPoint = ControlFile->minRecoveryPoint;
-	LocalMinRecoveryPointTLI = ControlFile->minRecoveryPointTLI;
 
 	if (XLogRecPtrIsInvalid(LocalMinRecoveryPoint))
 		updateMinRecoveryPoint = false;
@@ -3117,7 +3115,6 @@ UpdateMinRecoveryPoint(XLogRecPtr lsn, bool force)
 			ControlFile->minRecoveryPointTLI = newMinRecoveryPointTLI;
 			UpdateControlFile();
 			LocalMinRecoveryPoint = newMinRecoveryPoint;
-			LocalMinRecoveryPointTLI = newMinRecoveryPointTLI;
 
 			ereport(DEBUG2,
 					(errmsg_internal("updated min recovery point to %X/%X on timeline %u",
@@ -3505,7 +3502,6 @@ XLogNeedsFlush(XLogRecPtr record)
 		if (!LWLockConditionalAcquire(ControlFileLock, LW_SHARED))
 			return true;
 		LocalMinRecoveryPoint = ControlFile->minRecoveryPoint;
-		LocalMinRecoveryPointTLI = ControlFile->minRecoveryPointTLI;
 		LWLockRelease(ControlFileLock);
 
 		/*
@@ -6314,12 +6310,10 @@ StartupXLOG(void)
 		if (InArchiveRecovery)
 		{
 			LocalMinRecoveryPoint = ControlFile->minRecoveryPoint;
-			LocalMinRecoveryPointTLI = ControlFile->minRecoveryPointTLI;
 		}
 		else
 		{
 			LocalMinRecoveryPoint = InvalidXLogRecPtr;
-			LocalMinRecoveryPointTLI = 0;
 		}
 
 		/* Check that the GUCs used to generate the WAL allow recovery */
@@ -6373,6 +6367,7 @@ StartupXLOG(void)
 			 * during recovery and need not be started yet.
 			 */
 			StartupSUBTRANS(oldestActiveXID);
+			SetRecoverySubtransInitialized();
 
 			/*
 			 * If we're beginning at a shutdown checkpoint, we know that
@@ -6934,7 +6929,6 @@ SwitchIntoArchiveRecovery(XLogRecPtr EndRecPtr, TimeLineID replayTLI)
 	}
 	/* update local copy */
 	LocalMinRecoveryPoint = ControlFile->minRecoveryPoint;
-	LocalMinRecoveryPointTLI = ControlFile->minRecoveryPointTLI;
 
 	/*
 	 * The startup process can update its local copy of minRecoveryPoint from
@@ -8650,7 +8644,6 @@ CreateRestartPoint(int flags)
 
 				/* update local copy */
 				LocalMinRecoveryPoint = ControlFile->minRecoveryPoint;
-				LocalMinRecoveryPointTLI = ControlFile->minRecoveryPointTLI;
 			}
 			if (flags & CHECKPOINT_IS_SHUTDOWN)
 				ControlFile->state = DB_SHUTDOWNED_IN_RECOVERY;
@@ -8753,10 +8746,10 @@ CreateRestartPoint(int flags)
 	 * Truncate pg_subtrans if possible.  We can throw away all data before
 	 * the oldest XMIN of any running transaction.  No future transaction will
 	 * attempt to reference any pg_subtrans entry older than that (see Asserts
-	 * in subtrans.c).  When hot standby is disabled, though, we mustn't do
-	 * this because StartupSUBTRANS hasn't been called yet.
+	 * in subtrans.c).  During recovery, don't truncate pg_subtrans until hot
+	 * standby initialization has started it.
 	 */
-	if (EnableHotStandby)
+	if (RecoverySubtransInitialized())
 		TruncateSUBTRANS(GetOldestTransactionIdConsideredRunning());
 
 	/* Real work is done; log and update stats. */
@@ -9529,7 +9522,6 @@ xlog_redo(XLogReaderState *record)
 		if (InArchiveRecovery)
 		{
 			LocalMinRecoveryPoint = ControlFile->minRecoveryPoint;
-			LocalMinRecoveryPointTLI = ControlFile->minRecoveryPointTLI;
 		}
 		if (LocalMinRecoveryPoint != InvalidXLogRecPtr && LocalMinRecoveryPoint < lsn)
 		{

@@ -2382,6 +2382,80 @@ my %tests = (
 		like => { binary_upgrade => 1, },
 	},
 
+	'CREATE TYPE dump_test.rowtype_type' => {
+		create_order => 38,
+		create_sql => '
+		    CREATE TYPE dump_test.rowtype_type AS (a int, b_dropme int);
+			ALTER TYPE dump_test.rowtype_type DROP ATTRIBUTE b_dropme;
+			ALTER TYPE dump_test.rowtype_type ADD ATTRIBUTE c int;',
+		regexp => qr/^\QCREATE TYPE dump_test.rowtype_type AS (\E/m,
+		like =>
+		  { %full_runs, %dump_test_schema_runs, section_pre_data => 1, },
+		unlike => {
+			exclude_dump_test_schema => 1,
+			only_dump_measurement => 1,
+		},
+	},
+
+	'CREATE TABLE dump_test.rowtype_table' => {
+		create_order => 38,
+		create_sql => '
+		    CREATE TABLE dump_test.rowtype_table(a int, b_dropme int);
+			ALTER TABLE dump_test.rowtype_table DROP COLUMN b_dropme;
+			ALTER TABLE dump_test.rowtype_table ADD COLUMN c int;',
+		regexp => qr/^\QCREATE TABLE dump_test.rowtype_table (\E/m,
+		like =>
+		  { %full_runs, %dump_test_schema_runs, section_pre_data => 1, },
+		unlike => {
+			exclude_dump_test_schema => 1,
+			only_dump_measurement => 1,
+		},
+	},
+
+	# Iff in binary upgrade mode, dropped attributes & columns must be included
+	# in the CREATE TABLE/TYPE.
+	'dropped attribute, binary upgrade only' => {
+		regexp => qr/^
+		    \QCREATE TYPE dump_test.rowtype_type AS (\E
+			[^;]*
+			\"\.+pg\.dropped\.\d\.+\"\Q INTEGER \/* dummy *\/,\E
+			[^;]*
+			/xms,
+		like => { binary_upgrade => 1, },
+	},
+	'dropped column, binary upgrade only' => {
+		regexp => qr/^
+		    \QCREATE TABLE dump_test.rowtype_table (\E
+			[^;]*
+			\"\.+pg\.dropped\.\d\.+\"\Q INTEGER \/* dummy *\/,\E
+			[^;]*
+			/xms,
+		like => { binary_upgrade => 1, },
+	},
+
+	# Attribute and column versions are supplied ahead of the CREATE that
+	# consumes them iff in binary-upgrade mode.
+	'attribute version, binary upgrade only' => {
+		regexp => qr/^
+			\QSELECT pg_catalog.binary_upgrade_set_next_heap_pg_class_oid(\E [^;]* \Q);\E
+			(?:(?!^CREATE\b).)*?
+			\QSELECT pg_catalog.binary_upgrade_set_next_attribute_versions(\E [^;]* \Q);\E
+			(?:(?!^CREATE\b).)*?
+			^CREATE\sTYPE\sdump_test\.rowtype_type
+			/xms,
+		like => { binary_upgrade => 1, },
+	},
+	'column version, binary upgrade only' => {
+		regexp => qr/^
+			\QSELECT pg_catalog.binary_upgrade_set_next_attribute_versions(\E [^;]* \Q);\E
+			(?:(?!^CREATE\b).)*?
+			\QSELECT pg_catalog.binary_upgrade_set_next_heap_pg_class_oid(\E [^;]* \Q);\E
+			(?:(?!^CREATE\b).)*?
+			^CREATE\sTABLE\sdump_test\.rowtype_table
+			/xms,
+		like => { binary_upgrade => 1, },
+	},
+
 	'CREATE TYPE dump_test.textrange AS RANGE' => {
 		create_order => 38,
 		create_sql => 'CREATE TYPE dump_test.textrange
@@ -3782,6 +3856,31 @@ my %tests = (
 		regexp => qr/^
 			\QALTER INDEX dump_test.index_with_stats ALTER COLUMN 1 SET STATISTICS 400;\E\n
 			\QALTER INDEX dump_test.index_with_stats ALTER COLUMN 3 SET STATISTICS 500;\E\n
+			/xms,
+		like =>
+		  { %full_runs, %dump_test_schema_runs, section_post_data => 1, },
+		unlike => {
+			exclude_dump_test_schema => 1,
+			only_dump_measurement => 1,
+		},
+	},
+
+	'CREATE TABLE table_with_constraint_stats' => {
+		create_order => 98,
+		create_sql => 'CREATE TABLE dump_test.table_constraint_stats (
+						   col1 int,
+						   col2 int);
+						 ALTER TABLE dump_test.table_constraint_stats
+						   ADD CONSTRAINT ex_with_stats
+						   EXCLUDE USING btree ((col1 + 1) WITH =,
+							 col1 WITH =, (col2 + 1) WITH =);
+						 ALTER INDEX dump_test.ex_with_stats
+						   ALTER COLUMN 1 SET STATISTICS 100;
+						 ALTER INDEX dump_test.ex_with_stats
+						   ALTER COLUMN 3 SET STATISTICS 200;',
+		regexp => qr/^
+			\QALTER INDEX dump_test.ex_with_stats ALTER COLUMN 1 SET STATISTICS 100;\E\n
+			\QALTER INDEX dump_test.ex_with_stats ALTER COLUMN 3 SET STATISTICS 200;\E\n
 			/xms,
 		like =>
 		  { %full_runs, %dump_test_schema_runs, section_post_data => 1, },

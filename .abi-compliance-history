@@ -18,6 +18,51 @@
 # Be sure to replace "<ADD JUSTIFICATION HERE>" with details of your change and
 # why it is deemed acceptable.
 
+bcbcbd5a23c6740a55d024a5e24c003fc1f2891a
+#
+# Introduce attribute versioning to prevent unsafe deforming
+# 2026-11-09 06:20:49 -0800
+#
+# This commit adds a new GUC, which is fine, and a new pg_proc entry,
+# which is less fine but the alternatives are worse.  Fortunately the
+# new function is only needed in pg_upgrade's target installation,
+# which should have it if it's freshly initdb'd.
+
+fcb44c5e579fd32dbe96adf08a9f82ddaa518176
+#
+# Fix reuse of stale hash tables by duplicated hashed SubPlans
+# 2026-11-02 14:39:11 +0900
+#
+# SubPlanState gains a bool field in existing alignment padding, so
+# existing member offsets and sizeof(SubPlanState) remain unchanged.
+
+624bd2b1fc0c9750c28a55b436e17b109b72d701
+#
+# Reorderbuffer: handle catalog-change-bearing aborted subxacts better
+# Wed Oct 14 19:42:04 2026 +0200
+#
+# ReorderBufferAddNewTupleCids()'s signature changes and struct
+# ReorderBufferChange gains a field, but no known third-party calls the
+# former or constructs the latter.
+
+0405dcf7c6b1162dd1e4377d1862aa0a38629e6b
+#
+# Fix tuple search during apply after concurrent index DDL.
+# 2026-09-28 06:44:47 -0400
+#
+# LogicalRepRelMapEntry gains a bool field in existing alignment padding,
+# so existing member offsets and sizeof(LogicalRepRelMapEntry) remain unchanged.
+
+13466d1f78394a8ec2d6d0b1c9d8bf5ac3acb99a
+#
+# Perform join removal by editing the query's jointree.
+# 2026-08-28 15:12:26 -0400
+#
+# remove_useless_joins (now remove_useless_outer_joins) and
+# reduce_unique_semijoins have changed behavior and return types.
+# I am unaware of any impacted third-party code; if there is any,
+# it is probably vulnerable to the same bugs this patch is fixing.
+
 d1c8aa0b09f18bba1343ce2e4aa537a17a8a972f
 #
 # Check for USAGE privilege on types used by stored expressions.

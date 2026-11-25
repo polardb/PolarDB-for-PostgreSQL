@@ -195,6 +195,17 @@ NOTICE:  f_leak => awesome science fiction
    9 |  22 |      1 | regress_rls_dave  | awesome science fiction
 (4 rows)
 
+-- a rel with RLS quals can still be removed by outer-join removal
+EXPLAIN (COSTS OFF)
+SELECT c.cid FROM category c LEFT JOIN document d ON c.cid = d.did;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on category c
+   InitPlan 1
+     ->  Index Scan using uaccount_pkey on uaccount
+           Index Cond: (pguser = CURRENT_USER)
+(4 rows)
+
 -- viewpoint from regress_rls_carol
 SET SESSION AUTHORIZATION regress_rls_carol;
 SELECT * FROM document WHERE f_leak(dtitle) ORDER BY did;
@@ -2111,6 +2122,39 @@ ERROR:  new row violates row-level security policy (USING expression) for table 
 INSERT INTO document VALUES (1, (SELECT cid from category WHERE cname = 'novel'), 1, 'regress_rls_bob', 'my first novel')
     ON CONFLICT (did) DO UPDATE SET dauthor = 'regress_rls_carol';
 ERROR:  new row violates row-level security policy for table "document"
+-- The ON CONFLICT WHERE clause must not be evaluated against an existing row
+-- that fails the USING policy clauses, so f_leak must not emit a NOTICE here
+INSERT INTO document VALUES (3, (SELECT cid from category WHERE cname = 'novel'), 1, 'regress_rls_bob', 'another novel')
+    ON CONFLICT (did) DO UPDATE SET dtitle = EXCLUDED.dtitle
+    WHERE f_leak(document.dtitle) RETURNING did, dtitle;
+ERROR:  new row violates row-level security policy (USING expression) for table "document"
+-- Nor may the outcome depend on the WHERE clause's result
+INSERT INTO document VALUES (3, (SELECT cid from category WHERE cname = 'novel'), 1, 'regress_rls_bob', 'another novel')
+    ON CONFLICT (did) DO UPDATE SET dtitle = EXCLUDED.dtitle
+    WHERE document.dlevel = 2 RETURNING did, dtitle;
+ERROR:  new row violates row-level security policy (USING expression) for table "document"
+INSERT INTO document VALUES (3, (SELECT cid from category WHERE cname = 'novel'), 1, 'regress_rls_bob', 'another novel')
+    ON CONFLICT (did) DO UPDATE SET dtitle = EXCLUDED.dtitle
+    WHERE document.dlevel = 99 RETURNING did, dtitle;
+ERROR:  new row violates row-level security policy (USING expression) for table "document"
+-- The USING policy clauses are checked before the WHERE quals of a view,
+-- as they are before the ON CONFLICT WHERE clause, so f_leak must not emit
+-- a NOTICE for an existing row that fails them
+CREATE VIEW leaky_document_view AS SELECT * FROM document WHERE f_leak(dtitle);
+INSERT INTO leaky_document_view VALUES (3, (SELECT cid from category WHERE cname = 'novel'), 1, 'regress_rls_bob', 'another novel')
+    ON CONFLICT (did) DO UPDATE SET dtitle = excluded.dtitle RETURNING did, dtitle;
+ERROR:  new row violates row-level security policy (USING expression) for table "document"
+-- The view's quals are evaluated against an existing row that passes the
+-- USING policy clauses, so f_leak does emit a NOTICE here, even though the
+-- ON CONFLICT WHERE clause then rejects the update
+INSERT INTO leaky_document_view VALUES (1, (SELECT cid from category WHERE cname = 'novel'), 1, 'regress_rls_bob', 'another novel')
+    ON CONFLICT (did) DO UPDATE SET dtitle = excluded.dtitle WHERE leaky_document_view.dlevel = 99 RETURNING did, dtitle;
+NOTICE:  f_leak => my first novel
+ did | dtitle 
+-----+--------
+(0 rows)
+
+DROP VIEW leaky_document_view;
 --
 -- MERGE
 --
@@ -4446,6 +4490,13 @@ DROP POLICY p1 ON dob_t1; -- should succeed
 CREATE POLICY p1 ON dob_t2 TO regress_rls_dob_role1,regress_rls_dob_role2 USING (true);
 DROP OWNED BY regress_rls_dob_role1;
 DROP POLICY p1 ON dob_t2; -- should succeed
+-- only owner can change policies
+CREATE POLICY p1 ON dob_t1 TO regress_rls_dob_role1 USING (true);
+SET SESSION AUTHORIZATION regress_rls_dob_role1;
+DROP OWNED BY regress_rls_dob_role1; -- should warn
+WARNING:  role "regress_rls_dob_role1" could not be removed from policy "p1" for table "dob_t1"
+RESET SESSION AUTHORIZATION;
+DROP POLICY p1 ON dob_t1; -- should succeed
 DROP USER regress_rls_dob_role1;
 DROP USER regress_rls_dob_role2;
 -- Bug #15708: view + table with RLS should check policies as view owner

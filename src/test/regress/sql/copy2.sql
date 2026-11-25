@@ -175,6 +175,12 @@ COPY x from stdin WHERE a > 60003;
 60005	26	36	46	56
 \.
 
+COPY x from stdin WHERE NOT (a < 70003);
+70001	22	32	42	52
+70002	23	33	43	53
+70003	24	34	44	54
+\.
+
 COPY x from stdin WHERE f > 60003;
 \.
 
@@ -599,6 +605,18 @@ COPY check_ign_err FROM STDIN WITH (on_error ignore);
 -- test extra data: should fail
 COPY check_ign_err FROM STDIN WITH (on_error ignore);
 1	{1}	3	abc
+\.
+
+-- a hard error in the row following one skipped by ON_ERROR must report the
+-- line correctly.
+COPY check_ign_err FROM STDIN WITH (on_error ignore);
+1	{1}	stale_ignore_text
+2	{2}	2	extra
+\.
+
+COPY check_ign_err FROM STDIN WITH (format csv, on_error ignore);
+1,{1},stale_ignore_csv
+2,{2},2,extra
 \.
 
 -- clean up

@@ -240,7 +240,9 @@ HandleSlashCmds(PsqlScanState scan_state,
 	 * If we are in "restricted" mode, the only allowable backslash command is
 	 * \unrestrict (to exit restricted mode).
 	 */
-	if (restricted && strcmp(cmd, "unrestrict") != 0)
+	if (cmd == NULL)
+		status = PSQL_CMD_ERROR;
+	else if (restricted && strcmp(cmd, "unrestrict") != 0)
 	{
 		pg_log_error("backslash commands are restricted; only \\unrestrict is allowed");
 		status = PSQL_CMD_ERROR;
@@ -2028,7 +2030,7 @@ exec_command_lo(PsqlScanState scan_state, bool active_branch, const char *cmd)
 
 		if (strcmp(cmd + 3, "export") == 0)
 		{
-			if (!opt2)
+			if (!opt1 || !opt2)
 			{
 				pg_log_error("\\%s: missing required argument", cmd);
 				success = false;
@@ -2397,10 +2399,12 @@ exec_command_restrict(PsqlScanState scan_state, bool active_branch,
 		if (opt == NULL || opt[0] == '\0')
 		{
 			pg_log_error("\\%s: missing required argument", cmd);
+			free(opt);
 			return PSQL_CMD_ERROR;
 		}
 
 		restrict_key = pstrdup(opt);
+		free(opt);
 		restricted = true;
 	}
 	else
@@ -2733,22 +2737,26 @@ exec_command_unrestrict(PsqlScanState scan_state, bool active_branch,
 		if (opt == NULL || opt[0] == '\0')
 		{
 			pg_log_error("\\%s: missing required argument", cmd);
+			free(opt);
 			return PSQL_CMD_ERROR;
 		}
 
 		if (!restricted)
 		{
 			pg_log_error("\\%s: not currently in restricted mode", cmd);
+			free(opt);
 			return PSQL_CMD_ERROR;
 		}
 		else if (strcmp(opt, restrict_key) == 0)
 		{
 			pfree(restrict_key);
 			restricted = false;
+			free(opt);
 		}
 		else
 		{
 			pg_log_error("\\%s: wrong key", cmd);
+			free(opt);
 			return PSQL_CMD_ERROR;
 		}
 	}

@@ -42,7 +42,9 @@
 #include "storage/spin.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/expandedrecord.h"
 #include "utils/geo_decls.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/typcache.h"
@@ -644,6 +646,116 @@ make_tuple_indirect(PG_FUNCTION_ARGS)
 	 * function into a container type (record, array, etc) it should be OK.
 	 */
 	PG_RETURN_POINTER(newtup->t_data);
+}
+
+/*
+ * Functions for testing expanded records built from a flat composite datum.
+ *
+ * make_expanded_record_from_datum() is only reachable via
+ * DatumGetExpandedRecord(), i.e. PG_GETARG_EXPANDED_RECORD(), which has no
+ * in-core callers.
+ */
+
+/*
+ * Round-trip a composite datum through an expanded record.  Exercises
+ * DatumGetExpandedRecord() and, via the flatten callback, ER_flatten_into().
+ */
+PG_FUNCTION_INFO_V1(expanded_record_identity);
+Datum
+expanded_record_identity(PG_FUNCTION_ARGS)
+{
+	ExpandedRecordHeader *erh = PG_GETARG_EXPANDED_RECORD(0);
+
+	PG_RETURN_EXPANDED_RECORD(erh);
+}
+
+/*
+ * Report the identity of an expanded record built from a flat datum.
+ *
+ * The typmod is only reported as "is the type's default", as the actual value
+ * for a blessed RECORD is not reproducible.  A named rowtype must end up with
+ * typmod -1, a RECORD with a registered one.
+ */
+PG_FUNCTION_INFO_V1(expanded_record_info);
+Datum
+expanded_record_info(PG_FUNCTION_ARGS)
+{
+	ExpandedRecordHeader *erh = PG_GETARG_EXPANDED_RECORD(0);
+	TupleDesc	tupdesc = expanded_record_get_tupdesc(erh);
+
+	PG_RETURN_TEXT_P(cstring_to_text(psprintf("type %s, typmod is default: %s, natts %d",
+											  format_type_be(erh->er_typeid),
+											  erh->er_typmod == -1 ? "yes" : "no",
+											  tupdesc->natts)));
+}
+
+/*
+ * Read one field out of an expanded record built from a flat datum, forcing
+ * deconstruct_expanded_record() and thus a deform against the descriptor.
+ */
+PG_FUNCTION_INFO_V1(expanded_record_field_text);
+Datum
+expanded_record_field_text(PG_FUNCTION_ARGS)
+{
+	ExpandedRecordHeader *erh = PG_GETARG_EXPANDED_RECORD(0);
+	int			fnum = PG_GETARG_INT32(1);
+	TupleDesc	tupdesc = expanded_record_get_tupdesc(erh);
+	Datum		val;
+	bool		isnull;
+	Oid			outfunc;
+	bool		typIsVarlena;
+
+	if (fnum < 1 || fnum > tupdesc->natts)
+		elog(ERROR, "field number %d out of range", fnum);
+
+	val = expanded_record_get_field(erh, fnum, &isnull);
+	if (isnull)
+		PG_RETURN_NULL();
+
+	getTypeOutputInfo(TupleDescAttr(tupdesc, fnum - 1)->atttypid,
+					  &outfunc, &typIsVarlena);
+
+	PG_RETURN_TEXT_P(cstring_to_text(OidOutputFunctionCall(outfunc, val)));
+}
+
+/*
+ * Return a copy of a composite datum with its version removed, i.e. as a
+ * cluster predating the composite tuple versioning would have stored it.
+ *
+ * Such datums cannot be produced through SQL, but they have to stay readable
+ * after a minor version upgrade or across pg_upgrade, so tests need a way to
+ * generate one.
+ */
+PG_FUNCTION_INFO_V1(make_tuple_unversioned);
+Datum
+make_tuple_unversioned(PG_FUNCTION_ARGS)
+{
+	HeapTupleHeader rec;
+
+	if (!type_is_rowtype(get_fn_expr_argtype(fcinfo->flinfo, 0)))
+		elog(ERROR, "argument must be of a composite type");
+
+	/* modified below, so a copy is needed */
+	rec = PG_GETARG_HEAPTUPLEHEADER_COPY(0);
+
+	if (!HeapTupleHeaderIsVersionedDatum(rec))
+		elog(ERROR, "composite datum is not versioned");
+
+	/*
+	 * The version occupies the fields an unversioned datum uses for its
+	 * typmod and item pointer, so restore what forming one would have left
+	 * there: datums of a named composite type carry a typmod of -1, and
+	 * heap_form_tuple() clears t_ctid.
+	 */
+	HeapTupleHeaderSetTypMod(rec, -1);
+	ItemPointerSetInvalid(&rec->t_ctid);
+	HeapTupleHeaderClearDatum(rec);
+
+	/*
+	 * Use PG_RETURN_POINTER() instead of PG_RETURN_HEAPTUPLEHEADER(), to
+	 * prevent HeapTupleHeaderGetDatum() from failing assertions.
+	 */
+	PG_RETURN_POINTER(rec);
 }
 
 PG_FUNCTION_INFO_V1(get_environ);

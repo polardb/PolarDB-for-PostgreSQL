@@ -823,7 +823,8 @@ find_ec_member_matching_expr(EquivalenceClass *ec,
  * compute an expression in this way, setrefs.c is going to insist on exact
  * matches of Vars to the source tlist.
  *
- * Child EC members are ignored unless they belong to given 'relids'.
+ * If 'relids' is given, EC members are ignored unless they belong to it.  If
+ * 'relids' is NULL, all child members are ignored.
  * Also, non-parallel-safe expressions are ignored if 'require_parallel_safe'.
  *
  * Note: some callers pass root == NULL for notational reasons.  This is OK
@@ -864,9 +865,13 @@ find_computable_ec_member(PlannerInfo *root,
 			continue;
 
 		/*
-		 * Ignore child members unless they belong to the requested rel.
+		 * Ignore child members unless they belong to the requested rel.  If
+		 * 'relids' is given, ignore parent members that don't belong to it
+		 * either: for a child rel, a parent member's PlaceHolderVars would
+		 * otherwise match the translated ones in "exprs", since equal()
+		 * ignores phexpr and phrels when comparing PlaceHolderVars.
 		 */
-		if (em->em_is_child &&
+		if ((em->em_is_child || relids != NULL) &&
 			!bms_is_subset(em->em_relids, relids))
 			continue;
 
@@ -1881,19 +1886,27 @@ create_join_clause(PlannerInfo *root,
 										ec->ec_min_security);
 
 	/*
-	 * If either EM is a child, force the clause's clause_relids to include
-	 * the relid(s) of the child rel.  In normal cases it would already, but
-	 * not if we are considering appendrel child relations with pseudoconstant
-	 * translated variables (i.e., UNION ALL sub-selects with constant output
-	 * items).  We must do this so that join_clause_is_movable_into() will
-	 * think that the clause should be evaluated at the correct place.
+	 * If either EM is a child, set the clause's clause_relids from the
+	 * members' em_relids rather than the relids found in the expressions.
+	 * These normally match, but not for UNION ALL sub-selects whose output
+	 * items are constants (mentioning no rels) or contain lateral references
+	 * (mentioning rels that the child's parameterization supplies).  We must
+	 * do this so that join_clause_is_movable_into() will think that the
+	 * clause should be evaluated at the correct place.
 	 */
-	if (leftem->em_is_child)
-		rinfo->clause_relids = bms_add_members(rinfo->clause_relids,
-											   leftem->em_relids);
-	if (rightem->em_is_child)
-		rinfo->clause_relids = bms_add_members(rinfo->clause_relids,
-											   rightem->em_relids);
+	if (leftem->em_is_child || rightem->em_is_child)
+	{
+		Relids		baserels;
+
+		rinfo->clause_relids = bms_union(leftem->em_relids,
+										 rightem->em_relids);
+
+		/* keep num_base_rels in sync, as in make_restrictinfo() */
+		baserels = bms_difference(rinfo->clause_relids,
+								  root->outer_join_rels);
+		rinfo->num_base_rels = bms_num_members(baserels);
+		bms_free(baserels);
+	}
 
 	/* If it's a child clause, copy the parent's rinfo_serial */
 	if (parent_rinfo)
@@ -1987,6 +2000,12 @@ create_join_clause(PlannerInfo *root,
  * We handle this by generating a constant-TRUE clause that is marked with
  * the same required_relids etc as the removed outer-join clause, thus
  * making it a join clause between the correct relations.
+ *
+ * However, we can't do that for a clone clause, since it may be applied
+ * above a commuted outer join that has already null-extended OUTERVAR but
+ * whose relid has not yet been added to the joinrel.  The original strict
+ * clause is needed there to reject the null-extended rows, so we throw
+ * back a clone as-is, marked redundant for selectivity estimation.
  */
 void
 reconsider_outer_join_clauses(PlannerInfo *root)
@@ -2012,6 +2031,15 @@ reconsider_outer_join_clauses(PlannerInfo *root)
 				/* remove it from the list */
 				root->left_join_clauses =
 					foreach_delete_current(root->left_join_clauses, cell);
+				/* throw back a clone as-is (see notes above) */
+				if (rinfo->has_clone || rinfo->is_clone)
+				{
+					/* but the thrown-back clause has no extra selectivity */
+					rinfo->norm_selec = 2.0;
+					rinfo->outer_selec = 1.0;
+					distribute_restrictinfo_to_rels(root, rinfo);
+					continue;
+				}
 				/* throw back a dummy replacement clause (see notes above) */
 				rinfo = make_restrictinfo(root,
 										  (Expr *) makeBoolConst(true, false),
@@ -2040,6 +2068,15 @@ reconsider_outer_join_clauses(PlannerInfo *root)
 				/* remove it from the list */
 				root->right_join_clauses =
 					foreach_delete_current(root->right_join_clauses, cell);
+				/* throw back a clone as-is (see notes above) */
+				if (rinfo->has_clone || rinfo->is_clone)
+				{
+					/* but the thrown-back clause has no extra selectivity */
+					rinfo->norm_selec = 2.0;
+					rinfo->outer_selec = 1.0;
+					distribute_restrictinfo_to_rels(root, rinfo);
+					continue;
+				}
 				/* throw back a dummy replacement clause (see notes above) */
 				rinfo = make_restrictinfo(root,
 										  (Expr *) makeBoolConst(true, false),

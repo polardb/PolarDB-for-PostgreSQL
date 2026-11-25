@@ -901,7 +901,11 @@ heapgettup_advance_block(HeapScanDesc scan, BlockNumber block, ScanDirection dir
 		/* check if the limit imposed by heap_setscanlimits() is met */
 		if (scan->rs_numblocks != InvalidBlockNumber)
 		{
-			if (--scan->rs_numblocks == 0)
+			BlockNumber endblock;
+
+			endblock = (scan->rs_startblock + scan->rs_numblocks) %
+				scan->rs_nblocks;
+			if (block == endblock)
 				return InvalidBlockNumber;
 		}
 
@@ -909,16 +913,14 @@ heapgettup_advance_block(HeapScanDesc scan, BlockNumber block, ScanDirection dir
 	}
 	else
 	{
-		/* we're done if the last block is the start position */
+		/*
+		 * We're done if the last block is the start position.  No need to
+		 * check if rs_numblocks was set by heap_setscanlimits() as that only
+		 * changes the end block.  The start block is the same with or without
+		 * scan limits.
+		 */
 		if (block == scan->rs_startblock)
 			return InvalidBlockNumber;
-
-		/* check if the limit imposed by heap_setscanlimits() is met */
-		if (scan->rs_numblocks != InvalidBlockNumber)
-		{
-			if (--scan->rs_numblocks == 0)
-				return InvalidBlockNumber;
-		}
 
 		/* wrap to the end of the heap when the last page was page 0 */
 		if (block == 0)
@@ -2335,6 +2337,8 @@ heap_prepare_insert(Relation relation, HeapTuple tup, TransactionId xid,
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_TRANSACTION_STATE),
 				 errmsg("cannot insert tuples in a parallel worker")));
+
+	/* don't need to unset HEAP_IS_DATUM, it's part of HEAP_XACT_MASK */
 
 	tup->t_data->t_infomask &= ~(HEAP_XACT_MASK);
 	tup->t_data->t_infomask2 &= ~(HEAP2_XACT_MASK);
@@ -4061,14 +4065,25 @@ l2:
 			else
 				update_xact = InvalidTransactionId;
 
-			/*
-			 * There was no UPDATE in the MultiXact; or it aborted. No
-			 * TransactionIdIsInProgress() call needed here, since we called
-			 * MultiXactIdWait() above.
-			 */
-			if (!TransactionIdIsValid(update_xact) ||
-				TransactionIdDidAbort(update_xact))
+			if (!TransactionIdIsValid(update_xact))
+			{
+				/* no UPDATE in the MultiXact */
 				can_continue = true;
+			}
+			else
+			{
+				/*
+				 * There was another UPDATE.  Did it abort?
+				 *
+				 * Note: We check !TransactionIdDidCommit() instead of
+				 * TransactionIdDidAbort(), to treat crashed transactions as
+				 * aborted.  No TransactionIdIsInProgress() call is needed
+				 * here, because the MultiXactIdWait() call above already
+				 * waited for it to finish.
+				 */
+				if (!TransactionIdDidCommit(update_xact))
+					can_continue = true;
+			}
 		}
 		else if (TransactionIdIsCurrentTransactionId(xwait))
 		{
@@ -4244,6 +4259,8 @@ l2:
 	/*
 	 * Prepare the new tuple with the appropriate initial values of Xmin and
 	 * Xmax, as well as initial infomask bits as computed above.
+	 *
+	 * Don't need to unset HEAP_IS_DATUM, it's part of HEAP_XACT_MASK.
 	 */
 	newtup->t_data->t_infomask &= ~(HEAP_XACT_MASK);
 	newtup->t_data->t_infomask2 &= ~(HEAP2_XACT_MASK);
@@ -8361,8 +8378,9 @@ DoesMultiXactIdConflict(MultiXactId multi, uint16 infomask,
 
 			if (ISUPDATE_from_mxstatus(members[i].status))
 			{
-				/* ignore aborted updaters */
-				if (TransactionIdDidAbort(memxid))
+				/* ignore aborted (or crashed) updaters */
+				if (!TransactionIdIsInProgress(memxid) &&
+					!TransactionIdDidCommit(memxid))
 					continue;
 			}
 			else
@@ -9909,6 +9927,9 @@ ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool key_required,
 		{
 			*copy = true;
 			tp = toast_flatten_tuple(tp, desc);
+
+			/* see below */
+			Assert(!HeapTupleHeaderIsDatum(tp->t_data));
 		}
 		return tp;
 	}
@@ -9965,6 +9986,15 @@ ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool key_required,
 		key_tuple = toast_flatten_tuple(oldtup, desc);
 		heap_freetuple(oldtup);
 	}
+
+	/*
+	 * Because we only WAL log the tuple data itself, we don't want the tuple
+	 * to be marked as a versioned tuple, as we couldn't verify it due to the
+	 * necessary metadata not having been preserved. We also don't need it, if
+	 * there were a danger of the format changing, we'd be in much bigger
+	 * trouble.
+	 */
+	HeapTupleHeaderClearDatum(key_tuple->t_data);
 
 	return key_tuple;
 }

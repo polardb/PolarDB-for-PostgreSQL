@@ -184,8 +184,14 @@ command_fails_like(
 	[ 'pg_waldump', 'foo', 'bar' ],
 	qr/error: could not locate WAL file "foo"/,
 	'start file not found');
-command_like([ 'pg_waldump', $node->data_dir . '/pg_wal/' . $start_walfile ],
-	qr/./, 'runs with start segment specified');
+command_like(
+	[
+		'pg_waldump',
+		'--limit' => 1,
+		$node->data_dir . '/pg_wal/' . $start_walfile
+	],
+	qr/./,
+	'runs with start segment specified');
 command_fails_like(
 	[ 'pg_waldump', $node->data_dir . '/pg_wal/' . $start_walfile, 'bar' ],
 	qr/error: could not open file "bar"/,
@@ -193,6 +199,7 @@ command_fails_like(
 command_like(
 	[
 		'pg_waldump',
+		'--limit' => 1,
 		$node->data_dir . '/pg_wal/' . $start_walfile,
 		$node->data_dir . '/pg_wal/' . $end_walfile
 	],
@@ -217,6 +224,7 @@ command_fails_like(
 command_like(
 	[
 		'pg_waldump', '--quiet',
+		'--limit' => 1,
 		$node->data_dir . '/pg_wal/' . $start_walfile
 	],
 	qr/^$/,
@@ -240,7 +248,7 @@ command_fails_like(
 	my (@cmd, $stdout, $stderr, $result);
 
 	@cmd = (
-		'pg_waldump', '--start', $new_start,
+		'pg_waldump', '--start', $new_start, '--limit', 1,
 		$node->data_dir . '/pg_wal/' . $start_walfile);
 	$result = IPC::Run::run \@cmd, '>', \$stdout, '2>', \$stderr;
 	ok($result, "runs with start segment and start LSN specified");

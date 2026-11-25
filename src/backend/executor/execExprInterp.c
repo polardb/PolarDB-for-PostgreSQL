@@ -2815,6 +2815,13 @@ ExecEvalRowNullInt(ExprState *state, ExprEvalStep *op,
 	tmptup.t_len = HeapTupleHeaderGetDatumLength(tuple);
 	tmptup.t_data = tuple;
 
+	/*
+	 * NB: It's not necessary to call heap_datum_check() here: Even if the
+	 * tupledesc and tuple are mismatched, no invalid memory accesses or other
+	 * type unsafety occur. It seems useful to be able to test for which
+	 * attributes are actually set when encountering invalid datums.
+	 */
+
 	for (int att = 1; att <= tupDesc->natts; att++)
 	{
 		/* ignore dropped columns */
@@ -3309,7 +3316,7 @@ ExecEvalFieldStoreDeForm(ExprState *state, ExprEvalStep *op, ExprContext *econte
 	{
 		/* Convert null input tuple into an all-nulls row */
 		memset(op->d.fieldstore.nulls, true,
-			   op->d.fieldstore.ncolumns * sizeof(bool));
+			   op->d.fieldstore.tupdesc->natts * sizeof(bool));
 	}
 	else
 	{
@@ -3320,7 +3327,6 @@ ExecEvalFieldStoreDeForm(ExprState *state, ExprEvalStep *op, ExprContext *econte
 		Datum		tupDatum = *op->resvalue;
 		HeapTupleHeader tuphdr;
 		HeapTupleData tmptup;
-		TupleDesc	tupDesc;
 
 		tuphdr = DatumGetHeapTupleHeader(tupDatum);
 		tmptup.t_len = HeapTupleHeaderGetDatumLength(tuphdr);
@@ -3328,21 +3334,7 @@ ExecEvalFieldStoreDeForm(ExprState *state, ExprEvalStep *op, ExprContext *econte
 		tmptup.t_tableOid = InvalidOid;
 		tmptup.t_data = tuphdr;
 
-		/*
-		 * Lookup tupdesc if first time through or if type changes.  Because
-		 * we don't pin the tupdesc, we must not do this lookup until after
-		 * doing DatumGetHeapTupleHeader: that could do database access while
-		 * detoasting the datum.
-		 */
-		tupDesc = get_cached_rowtype(op->d.fieldstore.fstore->resulttype, -1,
-									 op->d.fieldstore.rowcache, NULL);
-
-		/* Check that current tupdesc doesn't have more fields than allocated */
-		if (unlikely(tupDesc->natts > op->d.fieldstore.ncolumns))
-			elog(ERROR, "too many columns in composite type %u",
-				 op->d.fieldstore.fstore->resulttype);
-
-		heap_deform_tuple(&tmptup, tupDesc,
+		heap_deform_tuple(&tmptup, op->d.fieldstore.tupdesc,
 						  op->d.fieldstore.values,
 						  op->d.fieldstore.nulls);
 	}
@@ -3355,14 +3347,9 @@ ExecEvalFieldStoreDeForm(ExprState *state, ExprEvalStep *op, ExprContext *econte
 void
 ExecEvalFieldStoreForm(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 {
-	TupleDesc	tupDesc;
 	HeapTuple	tuple;
 
-	/* Lookup tupdesc (should be valid already) */
-	tupDesc = get_cached_rowtype(op->d.fieldstore.fstore->resulttype, -1,
-								 op->d.fieldstore.rowcache, NULL);
-
-	tuple = heap_form_tuple(tupDesc,
+	tuple = heap_form_tuple(op->d.fieldstore.tupdesc,
 							op->d.fieldstore.values,
 							op->d.fieldstore.nulls);
 
@@ -3444,17 +3431,30 @@ ExecEvalConvertRowtype(ExprState *state, ExprEvalStep *op, ExprContext *econtext
 	}
 	else
 	{
+		HeapTupleHeader resulthdr;
+
 		/*
 		 * The tuple is physically compatible as-is, but we need to insert the
 		 * destination rowtype OID in its composite-datum header field, so we
 		 * have to copy it anyway.  heap_copy_tuple_as_datum() is convenient
-		 * for this since it will both make the physical copy and insert the
-		 * correct composite header fields.  Note that we aren't expecting to
+		 * for making the physical copy.  Note that we aren't expecting to
 		 * have to flatten any toasted fields: the input was a composite
 		 * datum, so it shouldn't contain any.  So heap_copy_tuple_as_datum()
 		 * is overkill here, but its check for external fields is cheap.
+		 *
+		 * Copying with indesc verifies that the tuple could be deformed with
+		 * indesc, which is crucial, as otherwise we would not detect cases
+		 * where the input tuple and the input tupledesc have gotten out of
+		 * sync (when executing the attribute map, deforming the tuple does
+		 * that).  indesc is known to be compatible with outdesc (otherwise
+		 * we'd have a map), so heap_tuple_set_datum() can then relabel the
+		 * copy with outdesc's header fields without verifying it against
+		 * outdesc, which would be more expensive.
 		 */
-		*op->resvalue = heap_copy_tuple_as_datum(&tmptup, outdesc);
+		*op->resvalue = heap_copy_tuple_as_datum(&tmptup, indesc);
+		resulthdr = (HeapTupleHeader) DatumGetPointer(*op->resvalue);
+		heap_tuple_set_datum(resulthdr, outdesc,
+							 HeapTupleHeaderGetDatumLength(resulthdr));
 	}
 
 	DecrTupleDescRefCount(indesc);
@@ -4332,8 +4332,15 @@ ExecEvalJsonIsPredicate(ExprState *state, ExprEvalStep *op)
 }
 
 /*
- * Evaluate a jsonpath against a document, both of which must have been
- * evaluated and their values saved in op->d.jsonexpr.jsestate.
+ * Evaluate a jsonpath against a document, whose values (if not NULL) have been
+ * saved in op->d.jsonexpr.jsestate.
+ *
+ * This step is reached even if the document or the jsonpath is NULL, so that
+ * JsonExprState.error and JsonExprState.empty are reset for every row before
+ * the ON ERROR / ON EMPTY steps look at them.  In that case, the result is
+ * NULL and jsonpath evaluation is skipped, as are the ON ERROR / ON EMPTY
+ * steps; the NULL is still passed through the coercion steps, if any, so that
+ * the constraints of a RETURNING domain type are checked.
  *
  * If an error occurs during JsonPath* evaluation or when coercing its result
  * to the RETURNING type, JsonExprState.error is set to true, provided the
@@ -4360,9 +4367,6 @@ ExecEvalJsonExprPath(ExprState *state, ExprEvalStep *op,
 	int			jump_eval_coercion = jsestate->jump_eval_coercion;
 	char	   *val_string = NULL;
 
-	item = jsestate->formatted_expr.value;
-	path = DatumGetJsonPathP(jsestate->pathspec.value);
-
 	/* Set error/empty to false. */
 	memset(&jsestate->error, 0, sizeof(NullableDatum));
 	memset(&jsestate->empty, 0, sizeof(NullableDatum));
@@ -4374,6 +4378,26 @@ ExecEvalJsonExprPath(ExprState *state, ExprEvalStep *op,
 		jsestate->escontext.details_wanted = false;
 	}
 	jsestate->escontext.error_occurred = false;
+
+	/*
+	 * Return NULL if formatted_expr or pathspec is NULL, skipping the ON
+	 * ERROR and ON EMPTY steps.  If the RETURNING type is a domain with
+	 * constraints, the NULL must still be coerced to it so that the
+	 * constraints are checked.
+	 */
+	if (jsestate->formatted_expr.isnull || jsestate->pathspec.isnull)
+	{
+		*op->resvalue = (Datum) 0;
+		*op->resnull = true;
+
+		if (jump_eval_coercion >= 0)
+			return jump_eval_coercion;
+		else
+			return jsestate->jump_end;
+	}
+
+	item = jsestate->formatted_expr.value;
+	path = DatumGetJsonPathP(jsestate->pathspec.value);
 
 	switch (jsexpr->op)
 	{
@@ -4420,6 +4444,7 @@ ExecEvalJsonExprPath(ExprState *state, ExprEvalStep *op,
 					{
 						val_string = DatumGetCString(DirectFunctionCall1(jsonb_out,
 																		 JsonbPGetDatum(JsonbValueToJsonb(jbv))));
+						*op->resnull = false;
 					}
 					else if (jsexpr->use_json_coercion)
 					{
@@ -4428,6 +4453,7 @@ ExecEvalJsonExprPath(ExprState *state, ExprEvalStep *op,
 					}
 					else
 					{
+						/* ExecGetJsonValueItemString() sets *op->resnull. */
 						val_string = ExecGetJsonValueItemString(jbv, op->resnull);
 
 						/*
@@ -4628,6 +4654,20 @@ ExecEvalJsonCoercion(ExprState *state, ExprEvalStep *op,
 					 ExprContext *econtext)
 {
 	ErrorSaveContext *escontext = op->d.jsonexpr_coercion.escontext;
+
+	/*
+	 * If an error was saved while evaluating the ON ERROR or ON EMPTY DEFAULT
+	 * expression whose result we are to coerce, that result is going to be
+	 * discarded when the following COERCION_FINISH step throws the error.
+	 * Don't coerce it; doing so might throw a hard error or overwrite the
+	 * saved error.
+	 */
+	if (SOFT_ERROR_OCCURRED(escontext))
+	{
+		*op->resnull = true;
+		*op->resvalue = (Datum) 0;
+		return;
+	}
 
 	/*
 	 * Prepare to call json_populate_type() to coerce the boolean result of
@@ -5056,9 +5096,12 @@ ExecEvalWholeRowVar(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	 *
 	 * (Note: we could skip doing this by passing op->d.wholerow.tupdesc to
 	 * the tuple build step; but that seems a tad risky so let's not.)
+	 *
+	 * XXX: What is the risk mentioned here? Not following... If the tuple
+	 * descriptors disagree, we're royally screwed, regardless of which
+	 * tupledesc is used for heap_tuple_set_datum()?
 	 */
-	HeapTupleHeaderSetTypeId(dtuple, op->d.wholerow.tupdesc->tdtypeid);
-	HeapTupleHeaderSetTypMod(dtuple, op->d.wholerow.tupdesc->tdtypmod);
+	heap_tuple_set_datum(dtuple, op->d.wholerow.tupdesc, tuple->t_len);
 
 	*op->resvalue = PointerGetDatum(dtuple);
 	*op->resnull = false;
